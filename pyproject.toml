@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "wallboard"
+version = "0.1.0"
+description = "Wallboard calendar dashboard"
+authors = ["Ryan Jacobchick <rjacobchick@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "wallboard" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "^0.115.0"
+uvicorn = { version = "^0.30.0", extras = ["standard"] }
+google-api-python-client = "^2.140.0"
+google-auth = "^2.30.0"
+google-auth-oauthlib = "^1.2.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
