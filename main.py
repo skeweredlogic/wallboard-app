@@ -3,6 +3,7 @@ import json
 import logging
 from fastapi import FastAPI
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +53,7 @@ async def startup():
         logger.error("startup calendar discovery failed: %s", e)
         state["sync_status"] = "error"
 
+@app.get("/health")
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
@@ -59,3 +61,9 @@ async def healthz():
 @app.get("/api/state")
 async def api_state():
     return state
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
