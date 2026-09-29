@@ -719,20 +719,35 @@ function tickNow() {
 /* Reload when the server is running a newer build than this page was loaded
    with, so an always-on wallboard display picks up UI changes unattended. */
 const VERSION_KEY = "wallboard.version";
+const RELOADED_KEY = "wallboard.reloadedFor";
 function checkVersion(v) {
   if (!v) return;
   let prev = null;
   try { prev = localStorage.getItem(VERSION_KEY); } catch (e) {}
-  if (prev && prev !== v) { location.reload(); return; }
+  if (prev && prev !== v) {
+    // Record the new version BEFORE reloading. If we reload first, localStorage
+    // still holds the old value on the next load, the mismatch repeats, and the
+    // page reloads forever.
+    try { localStorage.setItem(VERSION_KEY, v); } catch (e) {}
+    // Backstop: at most one reload per version per tab, so a bad state can
+    // never turn into a reload storm against the server.
+    let tried = null;
+    try { tried = sessionStorage.getItem(RELOADED_KEY); } catch (e) {}
+    if (tried === v) return;
+    try { sessionStorage.setItem(RELOADED_KEY, v); } catch (e) {}
+    location.reload();
+    return;
+  }
   try { localStorage.setItem(VERSION_KEY, v); } catch (e) {}
 }
 
 async function poll() {
   try {
-    // No cache:"no-store" — we want the browser to revalidate with our ETag so
-    // an unchanged poll returns a tiny 304 instead of the full payload.
+    // No cache:"no-store": we want the browser to revalidate against our ETag so
+    // an unchanged poll sends If-None-Match and the server answers 304 with no
+    // body (~380KB saved every poll). The browser resolves that into a normal 200
+    // served from cache, so there is no 304 to check for in JS.
     const res = await fetch("/api/state");
-    if (res.status === 304) { renderSync(); return; }
     if (!res.ok) throw new Error(`API ${res.status}`);
     state.data = await res.json();
     checkVersion(state.data.version);
