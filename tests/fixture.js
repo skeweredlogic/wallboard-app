@@ -111,6 +111,10 @@ function buildPayload() {
     calendars: Object.fromEntries(CALENDARS.map((c) => [c.id, c.summary])),
     calendar_list: CALENDARS,
     events,
+    tasks: buildTasks(today),
+    tasks_list: "Wallboard",
+    tasks_status: "ok",
+    tasks_error: null,
     timezone: TZ,
     can_write: true,
     version: "0.0.0-fixture",
@@ -120,4 +124,21 @@ function buildPayload() {
   };
 }
 
-module.exports = { buildPayload, CALENDARS, todayKey, shiftKey };
+// Mirrors the shape main.py's fetch_tasks() emits. Dates are relative to now so
+// the overdue / today / future assertions keep working as the clock moves.
+function buildTasks(today) {
+  return [
+    { id: "t-overdue", title: "Return library books", notes: "", due: shiftKey(today, -3),
+      has_subtasks: false, parent: null, position: "a", link: "" },
+    { id: "t-today", title: "Call the plumber", notes: "Before 5pm if possible", due: today,
+      has_subtasks: false, parent: null, position: "b", link: "" },
+    { id: "t-tomorrow", title: "Renew insurance", notes: "", due: shiftKey(today, 1),
+      has_subtasks: true, parent: null, position: "c", link: "" },
+    { id: "t-future", title: "Book dentist", notes: "", due: shiftKey(today, 9),
+      has_subtasks: false, parent: null, position: "d", link: "" },
+    { id: "t-nodue", title: "Declutter the garage", notes: "", due: null,
+      has_subtasks: false, parent: null, position: "e", link: "" },
+  ];
+}
+
+module.exports = { buildPayload, CALENDARS, todayKey, shiftKey, buildTasks };

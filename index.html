@@ -284,6 +284,34 @@
 
   ::-webkit-scrollbar { width: 0.9vmin; height: 0.9vmin; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 1vmin; }
+
+  /* ---- Tasks panel ------------------------------------------------------ */
+  .tasks-wrap { display: flex; flex-direction: column; gap: 1.1vmin; height: 100%; }
+  .tasks-head {
+    display: flex; align-items: baseline; gap: 1.4vmin; padding-bottom: 0.8vmin;
+    border-bottom: 0.15vmin solid var(--border);
+  }
+  .tasks-title { font-size: 2.6vmin; font-weight: 600; }
+  .tasks-count { font-size: 1.8vmin; color: var(--muted); }
+  .task-row {
+    display: grid; grid-template-columns: 3.2vmin 1fr auto; align-items: baseline;
+    gap: 1.2vmin; padding: 0.9vmin 0.6vmin; border-radius: 0.8vmin;
+    border-bottom: 0.1vmin solid var(--border);
+  }
+  /* Overdue is the only state that earns colour; everything else stays neutral
+     so a glance at the wall reads as "these are the problems". */
+  .task-row.overdue .task-title { color: #ff8b8b; }
+  .task-row.overdue .task-due { color: #ff8b8b; }
+  .task-row.due-today .task-due { color: #fbbc05; }
+  .task-box {
+    width: 2.2vmin; height: 2.2vmin; border-radius: 0.5vmin;
+    border: 0.25vmin solid var(--muted); display: inline-block;
+  }
+  .task-title { font-size: 2.1vmin; word-break: break-word; }
+  .task-row.overdue .task-box { border-color: #ff8b8b; }
+  .task-due { font-size: 2.1vmin; color: var(--muted); white-space: nowrap; }
+  .task-sub { font-size: 1.7vmin; color: var(--muted); }
+  .tasks-note { font-size: 1.9vmin; color: var(--muted); margin-top: 0.3vmin; }
 </style>
 </head>
 <body>
@@ -298,6 +326,7 @@
       <button class="tab" data-view="agenda">Agenda</button>
       <button class="tab" data-view="week">Week</button>
       <button class="tab" data-view="month">Month</button>
+      <button class="tab" data-view="tasks">Tasks</button>
     </div>
     <div class="nav">
       <button id="prev" title="Previous">&lsaquo;</button>
@@ -669,21 +698,106 @@ async function moveEvent(ev, toCal) {
 function closeModal() { document.getElementById("modal").hidden = true; }
 
 /* =========================================================================
+   Tasks panel
+   Reads state.data.tasks, produced server-side from the Google Tasks API.
+   ========================================================================= */
+function taskDueLabel(due) {
+  // Tasks carry date-only due values, so compare in wall-local day terms and
+  // label relative to the wall's today rather than the browser's.
+  const today = todayKey();
+  if (due === today) return "Today";
+  if (due === addDaysKey(today, 1)) return "Tomorrow";
+  if (due === addDaysKey(today, -1)) return "Yesterday";
+  const d = fromKey(due);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function tasksEmptyState(msg) {
+  return `<div class="tasks-wrap">
+    <div class="tasks-head"><div class="tasks-title">Tasks</div></div>
+    <div class="tasks-note">${esc(msg)}</div>
+  </div>`;
+}
+
+function renderTasks() {
+  const d = state.data || {};
+  const status = d.tasks_status;
+
+  // Degrade to an explanation instead of an empty list, so a missing scope is
+  // visibly a setup problem rather than "you have no tasks".
+  if (status === "unavailable")
+    return void (document.getElementById("main").innerHTML = tasksEmptyState(
+      "Tasks panel is not connected yet. Re-authorize the wallboard token with the " +
+      "Google Tasks scope to enable it."));
+  if (status === "missing")
+    return void (document.getElementById("main").innerHTML = tasksEmptyState(
+      `No Google Tasks list named "${d.tasks_list || "Wallboard"}" yet. ` +
+      "Create it in Google Tasks and it will appear here within a minute."));
+  if (status === "error")
+    return void (document.getElementById("main").innerHTML = tasksEmptyState(
+      `Could not read tasks: ${d.tasks_error || "unknown error"}`));
+  if (status === "never")
+    return void (document.getElementById("main").innerHTML = tasksEmptyState("Syncing tasks…"));
+
+  const tasks = d.tasks || [];
+  const listName = d.tasks_list || "Wallboard";
+  if (!tasks.length) {
+    document.getElementById("main").innerHTML = tasksEmptyState(
+      `Nothing outstanding in "${listName}".`);
+    return;
+  }
+
+  const today = todayKey();
+  const rows = tasks.map(t => {
+    let cls = "task-row";
+    let due = "";
+    if (t.due) {
+      due = `<div class="task-due">${esc(taskDueLabel(t.due))}</div>`;
+      if (t.due < today) cls += " overdue";
+      else if (t.due === today) cls += " due-today";
+    } else {
+      due = `<div class="task-due">no due date</div>`;
+    }
+    const sub = t.has_subtasks ? `<div class="task-sub">has subtasks</div>` : "";
+    const note = t.notes ? `<div class="task-sub">${esc(t.notes)}</div>` : "";
+    return `<div class="${cls}" data-task-id="${esc(t.id)}">
+      <div><span class="task-box"></span></div>
+      <div><div class="task-title">${esc(t.title)}</div>${sub}${note}</div>
+      ${due}
+    </div>`;
+  }).join("");
+
+  document.getElementById("main").innerHTML = `<div class="tasks-wrap">
+    <div class="tasks-head">
+      <div class="tasks-title">${esc(listName)}</div>
+      <div class="tasks-count">${tasks.length} open</div>
+    </div>
+    ${rows}
+  </div>`;
+}
+
+/* =========================================================================
    Nav + wiring
    ========================================================================= */
 function step(dir) {
   if (state.view === "agenda") state.cursor = addDaysKey(state.cursor, dir);
   else if (state.view === "week") state.cursor = addDaysKey(state.cursor, dir * 7);
-  else state.cursor = addMonthsKey(state.cursor, dir);
+  else if (state.view !== "tasks") state.cursor = addMonthsKey(state.cursor, dir);
 }
 
 function render() {
   if (!state.data) return;
   for (const t of document.querySelectorAll(".tab"))
     t.classList.toggle("active", t.dataset.view === state.view);
-  renderFilters();
+  // The Tasks view has no calendar range, so the calendar filter chips and the
+  // date stepper would both be meaningless noise on it.
+  const isTasks = state.view === "tasks";
+  document.getElementById("filters").hidden = isTasks;
+  document.querySelector(".nav").hidden = isTasks;
+  if (!isTasks) renderFilters();
   if (state.view === "agenda") renderAgenda();
   else if (state.view === "week") renderWeek();
+  else if (state.view === "tasks") renderTasks();
   else renderMonth();
 }
 

@@ -29,10 +29,18 @@ INDEX_PATH = os.environ.get("INDEX_PATH", "/app/index.html")
 # Stamped into /api/state so an already-open wallboard can detect a new build
 # and reload itself. A long-running display tab otherwise keeps running the
 # JavaScript it was loaded with, and new UI features look like they're missing.
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.5.0"
 
 CALENDAR_IDS = [c.strip() for c in CALENDAR_IDS_RAW.split(",") if c.strip()]
 CALENDAR_COLORS = json.loads(CALENDAR_COLORS_RAW)
+
+# --- Google Tasks panel -----------------------------------------------------
+# The task list the wallboard displays. Named rather than pinned to an id so a
+# recreated list (or a fresh account) keeps working without a redeploy.
+TASKS_LIST_NAME = os.environ.get("TASKS_LIST_NAME", "Wallboard")
+# Only incomplete tasks are shown; a wallboard is a "what's outstanding" surface.
+TASKS_MAX_ITEMS = int(os.environ.get("TASKS_MAX_ITEMS", "50"))
+TASKS_SCOPE = "https://www.googleapis.com/auth/tasks"
 
 # Friendly names for attendees, e.g. {"someone@example.com": "Tina"}. Configured
 # per-deployment so no personal addresses are baked into the app source.
@@ -69,6 +77,13 @@ state = {
     "calendars": {},
     "calendar_list": [],
     "events": [],
+    "tasks": [],
+    "tasks_list": TASKS_LIST_NAME,
+    # "ok" | "unavailable" (token lacks the scope) | "missing" (no such list)
+    # | "error". Only "ok" guarantees tasks is populated; the panel degrades to
+    # an explanatory state rather than a blank screen.
+    "tasks_status": "never",
+    "tasks_error": None,
     "timezone": TIMEZONE,
     "can_write": False,
     "last_sync": None,
@@ -99,7 +114,7 @@ def has_write_scope():
     return any(s in WRITE_SCOPES for s in token_scopes())
 
 
-def get_calendar_service():
+def get_valid_credentials():
     creds = load_credentials()
     if not creds.valid:
         if creds.expired and creds.refresh_token:
@@ -107,7 +122,15 @@ def get_calendar_service():
             creds.refresh(Request())
         else:
             raise ValueError("Invalid credentials and cannot refresh")
-    return build("calendar", "v3", credentials=creds)
+    return creds
+
+
+def get_calendar_service():
+    return build("calendar", "v3", credentials=get_valid_credentials())
+
+
+def has_tasks_scope():
+    return TASKS_SCOPE in token_scopes()
 
 
 def format_event_start(start, tz):
@@ -142,6 +165,94 @@ def format_attendees(item):
             "status": a.get("responseStatus", ""),
         })
     return out
+
+
+def _tasks_get(path, params=None):
+    """GET a Google Tasks API resource using the stored OAuth token.
+
+    Uses the raw REST endpoint rather than a discovery-based client because the
+    Tasks API has no service account support at all - it is user-scoped only -
+    and one shared token keeps the credential handling in a single place.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    creds = get_valid_credentials()
+    url = f"https://tasks.googleapis.com/tasks/v1/{path.lstrip('/')}"
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {creds.token}",
+        "Accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = json.load(e).get("error", {}).get("message", "")
+        except Exception:
+            pass
+        raise RuntimeError(f"tasks api {e.code}: {detail or e.reason}") from e
+
+
+def fetch_tasks():
+    """Return (tasks, status, error) for the configured task list.
+
+    Never raises: a missing scope or list must not take down the calendar half of
+    the wallboard, so failures are reported as a status the UI can explain.
+    """
+    if not has_tasks_scope():
+        return [], "unavailable", (
+            f"token is missing the {TASKS_SCOPE} scope; re-run "
+            "scripts/generate_token.py --force to add it"
+        )
+
+    try:
+        lists_body = _tasks_get("users/@me/lists", {"maxResults": 100})
+    except Exception as e:
+        return [], "error", str(e)
+
+    match = next((l for l in lists_body.get("items", [])
+                  if (l.get("title") or "").strip().lower() == TASKS_LIST_NAME.strip().lower()), None)
+    if not match:
+        return [], "missing", f'no task list named "{TASKS_LIST_NAME}"'
+
+    # showCompleted=false keeps finished work off the wall; showHidden=false
+    # drops completed subtasks whose parents are done.
+    try:
+        body = _tasks_get(f"lists/{match['id']}/tasks", {
+            "maxResults": TASKS_MAX_ITEMS,
+            "showCompleted": "false",
+            "showHidden": "false",
+        })
+    except Exception as e:
+        return [], "error", str(e)
+
+    tasks = []
+    for item in body.get("items", []):
+        if item.get("status") == "completed":
+            continue
+        tasks.append({
+            "id": item.get("id"),
+            "title": clean_text(item.get("title", "") or "(no title)", 300),
+            "notes": clean_text(item.get("notes", ""), 1000),
+            "due": item.get("due", "")[:10] or None,  # RFC3339 date-only for tasks
+            "has_subtasks": bool(item.get("subtasks")),
+            "parent": item.get("parent"),
+            "position": item.get("position", ""),
+            "link": item.get("selfLink", ""),
+        })
+
+    # Undated tasks first (nothing to sort by), then soonest due, then Google's
+    # own ordering string so the display is stable between syncs.
+    def sort_key(t):
+        return (t["due"] is not None, t["due"] or "9999-12-31", t["position"])
+
+    tasks.sort(key=sort_key)
+    return tasks, "ok", None
 
 
 def sync():
@@ -200,16 +311,26 @@ def sync():
                 })
 
         events.sort(key=lambda e: e["start"]["local"] or e["start"]["iso"])
+
+        # Tasks are fetched separately and independently: a Tasks failure must
+        # never discard a good calendar payload.
+        tasks, tasks_status, tasks_error = fetch_tasks()
+
         with _lock:
             state["calendars"] = display_map
             state["calendar_list"] = calendar_list
             state["events"] = events
+            state["tasks"] = tasks
+            state["tasks_status"] = tasks_status
+            state["tasks_error"] = tasks_error
             state["can_write"] = has_write_scope()
             state["last_sync"] = datetime.now(timezone.utc).isoformat()
             state["sync_status"] = "ok"
             state["error"] = None
-        logger.info("sync ok: %d events from %d calendars (can_write=%s)",
-                    len(events), len(ids), state["can_write"])
+        logger.info("sync ok: %d events from %d calendars (can_write=%s), "
+                    "%d tasks (tasks_status=%s)",
+                    len(events), len(ids), state["can_write"],
+                    len(tasks), tasks_status)
     except Exception as e:
         logger.error("sync failed: %s", e)
         with _lock:
@@ -240,6 +361,10 @@ async def api_state(request: HttpRequest):
             "calendars": dict(state["calendars"]),
             "calendar_list": list(state["calendar_list"]),
             "events": list(state["events"]),
+            "tasks": list(state["tasks"]),
+            "tasks_list": state["tasks_list"],
+            "tasks_status": state["tasks_status"],
+            "tasks_error": state["tasks_error"],
             "timezone": state["timezone"],
             "can_write": state["can_write"],
             "version": APP_VERSION,

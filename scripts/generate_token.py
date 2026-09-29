@@ -8,7 +8,14 @@ import http.server
 import urllib.parse
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+# calendar: read + move events between calendars (the Tasks panel's host app)
+# tasks:   read the `Wallboard` task list for the Tasks panel
+# Re-authorize with --force after changing this list; the generator skips
+# re-consent when the stored token already covers every scope here.
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/tasks",
+]
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "client_secret.json"
 REDIRECT_URI = "http://localhost:8080"

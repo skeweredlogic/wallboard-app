@@ -183,6 +183,44 @@ async function loadPayload() {
   check("small-screen rules restyle event titles", /\.event \.title\s*\{[^}]*font-size:\s*1\.\d+rem/.test(block));
   check("week view scrolls sideways on small screens", /\.wk-head, \.wk-allday, \.wk-body\s*\{[^}]*min-width/.test(block));
 
+  // --- Tasks panel --------------------------------------------------------
+  // A dedicated tab must render, label and colour-code tasks independently of
+  // the calendar views, and must not let the date stepper walk it off a date.
+  const taskRows = () => doc.querySelectorAll("#main .task-row").length;
+  check("Tasks tab exists", !!tab("tasks"));
+
+  click(tab("tasks"));
+  check("tasks view rendered rows", taskRows() > 0, `${taskRows()} rows`);
+  check("tasks rows are not calendar event blocks",
+    doc.querySelectorAll("#main [data-id]").length === 0,
+    "no [data-id] elements in the tasks view");
+
+  const rowFor = (id) => doc.querySelector(`#main [data-task-id="${id}"]`);
+  check("overdue task is marked overdue", !!rowFor("t-overdue")?.classList.contains("overdue"));
+  check("task due today is flagged", !!rowFor("t-today")?.classList.contains("due-today"));
+  check("future task is not flagged as a problem",
+    !rowFor("t-future")?.classList.contains("overdue") &&
+    !rowFor("t-future")?.classList.contains("due-today"));
+  check("undated task is not flagged as overdue", !rowFor("t-nodue")?.classList.contains("overdue"));
+
+  const dueText = (id) => rowFor(id)?.querySelector(".task-due")?.textContent || "";
+  check("due-today label reads Today", dueText("t-today") === "Today", dueText("t-today"));
+  check("tomorrow label is relative", dueText("t-tomorrow") === "Tomorrow", dueText("t-tomorrow"));
+  check("undated task says so", dueText("t-nodue") === "no due date", dueText("t-nodue"));
+  check("overdue label names a real past date", /\w+ \d+/.test(dueText("t-overdue")), dueText("t-overdue"));
+
+  check("task notes are rendered", (rowFor("t-today")?.textContent || "").includes("Before 5pm"));
+  check("subtask marker shown", (rowFor("t-tomorrow")?.textContent || "").includes("has subtasks"));
+  check("open task count shown", /\d+ open/.test(doc.querySelector(".tasks-count")?.textContent || ""),
+    doc.querySelector(".tasks-count")?.textContent || "(missing)");
+
+  // Chrome that does not apply to a task list must be hidden.
+  check("calendar filters hidden on tasks view", doc.getElementById("filters").hidden === true);
+  check("date stepper hidden on tasks view", doc.querySelector(".nav").hidden === true);
+  check("filters restored on calendar view", (click(tab("agenda"), doc.getElementById("filters").hidden === false),
+    doc.getElementById("filters").hidden === false));
+  check("stepper restored on calendar view", doc.querySelector(".nav").hidden === false);
+
   // --- version stamp ------------------------------------------------------
   check("api/state carries a version", typeof payload.version === "string" && payload.version.length > 0,
     payload.version || "(missing)");
