@@ -32,7 +32,7 @@ vault kv put secret/infra/wallboard-token token_json=@token.json
 | `CALENDAR_COLORS` | `{}` | JSON mapping of calendar ID → hex color |
 | `CACHE_TTL_SECONDS` | `300` | How often to poll Google Calendar |
 | `LOOKAHEAD_DAYS` | `90` | How many days of future events to fetch |
-| `LOOKBACK_DAYS` | `35` | How many days of past events to fetch |
+| `LOOKBACK_DAYS` | `0` | How many days of past events to fetch (`0` = no historical events; past events drop off) |
 | `TIMEZONE` | `America/New_York` | Timezone used to bucket events by day |
 | `INDEX_PATH` | `/app/index.html` | Path to the wallboard HTML page |
 | `PORT` | `8000` | HTTP port to listen on |
