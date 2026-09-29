@@ -32,16 +32,19 @@ vault kv put secret/infra/wallboard-token token_json=@token.json
 | `CALENDAR_COLORS` | `{}` | JSON mapping of calendar ID → hex color |
 | `CACHE_TTL_SECONDS` | `300` | How often to poll Google Calendar |
 | `LOOKAHEAD_DAYS` | `90` | How many days of future events to fetch |
-| `LOOKBACK_DAYS` | `0` | How many days of past events to fetch (`0` = no historical events; past events drop off) |
+| `LOOKBACK_DAYS` | `365` | How many days of past events to fetch (reachable by stepping back in the agenda) |
 | `TIMEZONE` | `America/New_York` | Timezone used to bucket events by day |
+| `ATTENDEE_ALIASES` | `{}` | JSON map of attendee email → friendly name, e.g. `{"a@b.com":"Tina"}`. Set per-deployment. |
 | `INDEX_PATH` | `/app/index.html` | Path to the wallboard HTML page |
 | `PORT` | `8000` | HTTP port to listen on |
 
 ## Endpoints
 
-- `GET /` - The wallboard UI. Three views (Agenda / Week / Month), per-calendar
-  filter chips, clickable events with a detail modal, and duration/space-aware
-  rendering (event blocks are sized by how long they last).
+- `GET /` - The wallboard UI. Agenda (one day, arrows step by day) / Week / Month views,
+  per-calendar filter chips, clickable events with a detail modal (When / Where / Duration /
+  Attendees / Notes + Google link), and duration/space-aware rendering. Layout is responsive:
+  the default sizing targets a wall panel, and a small-screen breakpoint switches to a
+  touch-sized layout (44px+ tap targets, sideways-scrolling week).
 - `GET /health` / `GET /healthz` - Health check (used by probes)
 - `GET /api/state` - Calendar list, upcoming events, `can_write` capability, and the
   server's `version` (JSON). The page stores that version and reloads itself when it

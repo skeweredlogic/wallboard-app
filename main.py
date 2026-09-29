@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request as HttpRequest
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -22,17 +22,27 @@ CALENDAR_IDS_RAW = os.environ.get("CALENDAR_IDS", "")
 CALENDAR_COLORS_RAW = os.environ.get("CALENDAR_COLORS", "{}")
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
 LOOKAHEAD_DAYS = int(os.environ.get("LOOKAHEAD_DAYS", "90"))
-LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "0"))
+LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "365"))
 TIMEZONE = os.environ.get("TIMEZONE", "America/New_York")
 PORT = int(os.environ.get("PORT", "8000"))
 INDEX_PATH = os.environ.get("INDEX_PATH", "/app/index.html")
 # Stamped into /api/state so an already-open wallboard can detect a new build
 # and reload itself. A long-running display tab otherwise keeps running the
 # JavaScript it was loaded with, and new UI features look like they're missing.
-APP_VERSION = "0.3.2"
+APP_VERSION = "0.4.0"
 
 CALENDAR_IDS = [c.strip() for c in CALENDAR_IDS_RAW.split(",") if c.strip()]
 CALENDAR_COLORS = json.loads(CALENDAR_COLORS_RAW)
+
+# Friendly names for attendees, e.g. {"someone@example.com": "Tina"}. Configured
+# per-deployment so no personal addresses are baked into the app source.
+ATTENDEE_ALIASES_RAW = os.environ.get("ATTENDEE_ALIASES", "{}")
+try:
+    ATTENDEE_ALIASES = {str(k).strip().lower(): str(v).strip()
+                        for k, v in json.loads(ATTENDEE_ALIASES_RAW).items()}
+except Exception:
+    logger.warning("ATTENDEE_ALIASES is not valid JSON; ignoring it")
+    ATTENDEE_ALIASES = {}
 
 # Scopes that permit mutating calendars (moving events).
 WRITE_SCOPES = (
@@ -125,9 +135,10 @@ def clean_text(text, limit=1000):
 def format_attendees(item):
     out = []
     for a in item.get("attendees", []) or []:
+        email = (a.get("email") or "").strip()
         out.append({
-            "name": a.get("displayName") or a.get("email", ""),
-            "email": a.get("email", ""),
+            "name": ATTENDEE_ALIASES.get(email.lower()) or a.get("displayName") or email,
+            "email": email,
             "status": a.get("responseStatus", ""),
         })
     return out
@@ -223,9 +234,9 @@ async def healthz():
 
 
 @app.get("/api/state")
-async def api_state():
+async def api_state(request: HttpRequest):
     with _lock:
-        return {
+        payload = {
             "calendars": dict(state["calendars"]),
             "calendar_list": list(state["calendar_list"]),
             "events": list(state["events"]),
@@ -236,6 +247,13 @@ async def api_state():
             "sync_status": state["sync_status"],
             "error": state["error"],
         }
+        # With a year of history the payload is a few hundred KB and the client
+        # polls often, but the data only changes when a sync runs. Key the ETag on
+        # last_sync so unchanged polls cost a 304 instead of the whole body.
+        etag = f'"{payload["last_sync"]}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+    return JSONResponse(payload, headers={"ETag": etag})
 
 
 class MovePayload(BaseModel):

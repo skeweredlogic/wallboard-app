@@ -53,7 +53,6 @@
     font-size: 2vmin; line-height: 1; display: grid; place-items: center;
   }
   .nav button:hover { background: var(--panel-2); }
-  .nav button:disabled { opacity: 0.28; cursor: default; background: var(--panel); }
   .nav .today { width: auto; padding: 0 1.6vmin; font-size: 1.8vmin; }
   .range-label { font-size: 2.2vmin; font-weight: 600; min-width: 26vmin; text-align: center; }
 
@@ -198,6 +197,91 @@
   }
   .modal-card a.gcal:hover { background: var(--panel-2); }
 
+  /* ---------- responsive: small screens ----------
+     Everything above is sized in vmin, which assumes a big wall panel. On a
+     phone vmin is ~4px, so controls collapse to ~16px and text to ~12px. This
+     block re-sizes the UI for touch and lets the page scroll normally. */
+  @media (max-width: 820px) {
+    body { padding: 12px 12px 10px; overflow: auto; }
+    header { flex-wrap: wrap; gap: 6px; padding-bottom: 10px; }
+    #clock { font-size: clamp(2.6rem, 12vw, 4rem); }
+    #date { font-size: 1.05rem; }
+    #sync { font-size: 0.8rem; text-align: left; }
+
+    .toolbar { flex-wrap: wrap; gap: 8px; padding: 10px 0; }
+    .tabs { padding: 4px; gap: 4px; }
+    .tab { font-size: 0.95rem; padding: 12px 14px; }
+    .nav { margin-left: 0; width: 100%; gap: 8px; }
+    .nav button { width: 48px; height: 48px; font-size: 1.4rem; border-radius: 10px; flex-shrink: 0; }
+    .nav .today { flex: 1; font-size: 0.95rem; }
+    .range-label { font-size: 0.95rem; min-width: 0; flex: 1; }
+
+    .filters { gap: 8px; padding: 10px 0 4px; }
+    .chip { font-size: 0.95rem; padding: 12px 16px; gap: 8px; }
+    .chip .dot { width: 12px; height: 12px; }
+
+    main { overflow: visible; margin-top: 12px; }
+    .agenda { overflow: visible; padding-right: 0; }
+    .agenda-day { margin-bottom: 20px; }
+    .day-head { font-size: 1.15rem; gap: 10px; margin-bottom: 10px; }
+    .day-head .count { font-size: 0.9rem; }
+    .day-strip { height: 14px; margin-bottom: 10px; }
+    .strip-label { font-size: 9px; }
+    .event { padding: 14px; gap: 12px; border-left-width: 5px; border-radius: 0 10px 10px 0; }
+    .event .time { font-size: 0.95rem; min-width: 74px; }
+    .event .title { font-size: 1.1rem; white-space: normal; }
+    .event .title .sub { display: block; font-size: 0.85rem; }
+    .event .dur { font-size: 0.85rem; }
+    .event .dur-bar { width: 56px; height: 6px; }
+    .event .cal { font-size: 0.8rem; }
+
+    /* 7 proportional columns don't fit a phone: scroll the week sideways
+       with a usable minimum column width. */
+    .week { overflow-x: auto; overflow-y: hidden; }
+    .wk-head, .wk-allday, .wk-body { min-width: 700px; }
+    .wk-day-head { font-size: 0.8rem; }
+    .wk-day-head .num { font-size: 1.2rem; }
+    .wk-allday-chip { font-size: 0.75rem; }
+    .wk-block { font-size: 0.8rem; }
+    .wk-block .s { font-size: 0.7rem; }
+    .wk-hour-label { font-size: 0.7rem; }
+
+    .month { overflow: visible; }
+    .mo-dow span { font-size: 0.7rem; }
+    .mo-grid { gap: 2px; }
+    .mo-cell { padding: 5px 4px; gap: 2px; }
+    .mo-date { font-size: 0.85rem; }
+    .mo-chip { font-size: 0.65rem; padding: 2px 4px; }
+    .mo-more { font-size: 0.65rem; }
+
+    .empty { font-size: 1.3rem; }
+    .empty .big { font-size: 2rem; margin-bottom: 8px; }
+    .error { font-size: 1.05rem; }
+
+    .modal-card { width: min(94vw, 560px); padding: 22px 18px 18px; border-radius: 14px; }
+    .modal-accent { width: 6px; border-radius: 14px 0 0 14px; }
+    .modal-x { width: 44px; height: 44px; font-size: 1.4rem; top: 12px; right: 12px; }
+    .modal-card h2 { font-size: 1.5rem; margin-right: 48px; }
+    .modal-cal { font-size: 0.85rem; }
+    .modal-card dl { margin-top: 18px; gap: 14px; }
+    .modal-card .row { flex-direction: column; gap: 2px; }
+    .modal-card dt { width: auto; font-size: 0.72rem; }
+    .modal-card dd { font-size: 1rem; }
+    .modal-card select { font-size: 1rem; padding: 12px; }
+    .move-msg, .ro { font-size: 0.85rem; }
+    .modal-card a.gcal { font-size: 0.9rem; padding: 13px 16px; }
+  }
+
+  /* Touch devices: no hover highlight, and keep tap targets finger-sized. */
+  @media (hover: none) and (max-width: 820px) {
+    .event, .strip-block, .wk-block, .mo-chip, .wk-allday-chip { cursor: default; }
+  }
+
+  @media (min-width: 821px) and (max-width: 1200px) {
+    .nav button { width: 40px; height: 40px; font-size: 1.4rem; }
+    .tab { padding: 10px 16px; }
+  }
+
   ::-webkit-scrollbar { width: 0.9vmin; height: 0.9vmin; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 1vmin; }
 </style>
@@ -262,6 +346,13 @@ function todayKey() {
 
 function fmtLong(k) { return fromKey(k).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }); }
 function fmtMed(k) { return fromKey(k).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
+function dayLabel(k) {
+  const t = todayKey();
+  if (k === t) return "Today";
+  if (k === addDaysKey(t, -1)) return "Yesterday";
+  if (k === addDaysKey(t, 1)) return "Tomorrow";
+  return fmtLong(k);
+}
 function fmtMonthYear(k) { return fromKey(k).toLocaleDateString("en-US", { month: "long", year: "numeric" }); }
 function startOfWeekKey(k) {
   const d = fromKey(k); d.setDate(d.getDate() - d.getDay()); return toKey(d);
@@ -369,20 +460,21 @@ function agendaRows(events) {
 }
 
 function renderAgenda() {
-  // Agenda is "today only" — past days and the far future are what the week and
-  // month views (and the nav) are for.
+  // Agenda shows a single day (today by default) and the arrows step by day.
+  // Week and month are for wider ranges; past days are available via the arrows.
   const map = indexByDay();
-  const today = todayKey();
-  const list = eventsOnDay(map, today);
+  const k = state.cursor;
+  const isToday = k === todayKey();
+  const list = eventsOnDay(map, k);
 
-  document.getElementById("range").textContent = fmtLong(today);
+  document.getElementById("range").textContent = isToday ? fmtLong(k) : dayLabel(k);
   const main = document.getElementById("main");
   if (!list.length) {
-    main.innerHTML = `<div class="empty"><div class="big">Nothing today</div>${esc(fmtLong(today))}</div>`;
+    main.innerHTML = `<div class="empty"><div class="big">Nothing scheduled</div>${esc(dayLabel(k))}</div>`;
     return;
   }
   main.innerHTML = `<div class="agenda"><div class="agenda-day">
-    <div class="day-head today">Today<span class="count">· ${list.length} event${list.length > 1 ? "s" : ""}</span></div>
+    <div class="day-head ${isToday ? "today" : ""}">${esc(dayLabel(k))}<span class="count">· ${list.length} event${list.length > 1 ? "s" : ""}</span></div>
     ${stripHtml(list)}
     ${agendaRows(list)}
   </div></div>`;
@@ -580,9 +672,8 @@ function closeModal() { document.getElementById("modal").hidden = true; }
    Nav + wiring
    ========================================================================= */
 function step(dir) {
-  // The agenda is always "today", so it has nothing to step through.
-  if (state.view === "agenda") return;
-  if (state.view === "week") state.cursor = addDaysKey(state.cursor, dir * 7);
+  if (state.view === "agenda") state.cursor = addDaysKey(state.cursor, dir);
+  else if (state.view === "week") state.cursor = addDaysKey(state.cursor, dir * 7);
   else state.cursor = addMonthsKey(state.cursor, dir);
 }
 
@@ -590,9 +681,6 @@ function render() {
   if (!state.data) return;
   for (const t of document.querySelectorAll(".tab"))
     t.classList.toggle("active", t.dataset.view === state.view);
-  const navless = state.view === "agenda";
-  document.getElementById("prev").disabled = navless;
-  document.getElementById("next").disabled = navless;
   renderFilters();
   if (state.view === "agenda") renderAgenda();
   else if (state.view === "week") renderWeek();
@@ -641,7 +729,11 @@ function checkVersion(v) {
 
 async function poll() {
   try {
-    const res = await fetch("/api/state", { cache: "no-store" });
+    // No cache:"no-store" — we want the browser to revalidate with our ETag so
+    // an unchanged poll returns a tiny 304 instead of the full payload.
+    const res = await fetch("/api/state");
+    if (res.status === 304) { renderSync(); return; }
+    if (!res.ok) throw new Error(`API ${res.status}`);
     state.data = await res.json();
     checkVersion(state.data.version);
     if (!state.cursor) state.cursor = todayKey();

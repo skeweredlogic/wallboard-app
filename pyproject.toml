@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wallboard"
-version = "0.3.2"
+version = "0.4.0""
 description = "Wallboard calendar dashboard"
 authors = ["Ryan Jacobchick <rjacobchick@gmail.com>"]
 license = "MIT"
