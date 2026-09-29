@@ -43,7 +43,9 @@ vault kv put secret/infra/wallboard-token token_json=@token.json
   filter chips, clickable events with a detail modal, and duration/space-aware
   rendering (event blocks are sized by how long they last).
 - `GET /health` / `GET /healthz` - Health check (used by probes)
-- `GET /api/state` - Calendar list, upcoming events, and `can_write` capability (JSON)
+- `GET /api/state` - Calendar list, upcoming events, `can_write` capability, and the
+  server's `version` (JSON). The page stores that version and reloads itself when it
+  changes, so an always-on wallboard display picks up new builds unattended.
 - `POST /api/events/move` - Move an event to another displayed calendar.
   Body: `{"event_id": "...", "from_calendar": "...", "to_calendar": "..."}`.
   Requires a **write-scoped** token (see below); returns 403 otherwise.

@@ -53,6 +53,7 @@
     font-size: 2vmin; line-height: 1; display: grid; place-items: center;
   }
   .nav button:hover { background: var(--panel-2); }
+  .nav button:disabled { opacity: 0.28; cursor: default; background: var(--panel); }
   .nav .today { width: auto; padding: 0 1.6vmin; font-size: 1.8vmin; }
   .range-label { font-size: 2.2vmin; font-weight: 600; min-width: 26vmin; text-align: center; }
 
@@ -368,27 +369,23 @@ function agendaRows(events) {
 }
 
 function renderAgenda() {
+  // Agenda is "today only" — past days and the far future are what the week and
+  // month views (and the nav) are for.
   const map = indexByDay();
   const today = todayKey();
-  const days = [...Array(28)].map((_, i) => addDaysKey(state.cursor, i));
-  const withEvents = days.filter(k => (map[k] || []).length);
-  document.getElementById("range").textContent =
-    `Next 4 weeks from ${fmtMed(state.cursor)}`;
+  const list = eventsOnDay(map, today);
+
+  document.getElementById("range").textContent = fmtLong(today);
   const main = document.getElementById("main");
-  if (!withEvents.length) {
-    main.innerHTML = `<div class="empty"><div class="big">Nothing scheduled</div>from ${esc(fmtLong(state.cursor))} onward</div>`;
+  if (!list.length) {
+    main.innerHTML = `<div class="empty"><div class="big">Nothing today</div>${esc(fmtLong(today))}</div>`;
     return;
   }
-  main.innerHTML = `<div class="agenda">` + withEvents.map(k => {
-    const list = eventsOnDay(map, k);
-    const label = k === today ? "Today" : fmtLong(k);
-    return `<div class="agenda-day">
-      <div class="day-head ${k === today ? "today" : ""}">${esc(label)}
-        <span class="count">· ${list.length} event${list.length > 1 ? "s" : ""}</span></div>
-      ${stripHtml(list)}
-      ${agendaRows(list)}
-    </div>`;
-  }).join("") + `</div>`;
+  main.innerHTML = `<div class="agenda"><div class="agenda-day">
+    <div class="day-head today">Today<span class="count">· ${list.length} event${list.length > 1 ? "s" : ""}</span></div>
+    ${stripHtml(list)}
+    ${agendaRows(list)}
+  </div></div>`;
 }
 
 /* =========================================================================
@@ -583,8 +580,9 @@ function closeModal() { document.getElementById("modal").hidden = true; }
    Nav + wiring
    ========================================================================= */
 function step(dir) {
-  if (state.view === "agenda") state.cursor = addDaysKey(state.cursor, dir * 14);
-  else if (state.view === "week") state.cursor = addDaysKey(state.cursor, dir * 7);
+  // The agenda is always "today", so it has nothing to step through.
+  if (state.view === "agenda") return;
+  if (state.view === "week") state.cursor = addDaysKey(state.cursor, dir * 7);
   else state.cursor = addMonthsKey(state.cursor, dir);
 }
 
@@ -592,6 +590,9 @@ function render() {
   if (!state.data) return;
   for (const t of document.querySelectorAll(".tab"))
     t.classList.toggle("active", t.dataset.view === state.view);
+  const navless = state.view === "agenda";
+  document.getElementById("prev").disabled = navless;
+  document.getElementById("next").disabled = navless;
   renderFilters();
   if (state.view === "agenda") renderAgenda();
   else if (state.view === "week") renderWeek();
@@ -627,10 +628,22 @@ function tickNow() {
     now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
+/* Reload when the server is running a newer build than this page was loaded
+   with, so an always-on wallboard display picks up UI changes unattended. */
+const VERSION_KEY = "wallboard.version";
+function checkVersion(v) {
+  if (!v) return;
+  let prev = null;
+  try { prev = localStorage.getItem(VERSION_KEY); } catch (e) {}
+  if (prev && prev !== v) { location.reload(); return; }
+  try { localStorage.setItem(VERSION_KEY, v); } catch (e) {}
+}
+
 async function poll() {
   try {
     const res = await fetch("/api/state", { cache: "no-store" });
     state.data = await res.json();
+    checkVersion(state.data.version);
     if (!state.cursor) state.cursor = todayKey();
     render(); renderSync();
   } catch (e) {

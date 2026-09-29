@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,6 +26,10 @@ LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "0"))
 TIMEZONE = os.environ.get("TIMEZONE", "America/New_York")
 PORT = int(os.environ.get("PORT", "8000"))
 INDEX_PATH = os.environ.get("INDEX_PATH", "/app/index.html")
+# Stamped into /api/state so an already-open wallboard can detect a new build
+# and reload itself. A long-running display tab otherwise keeps running the
+# JavaScript it was loaded with, and new UI features look like they're missing.
+APP_VERSION = "0.3.2"
 
 CALENDAR_IDS = [c.strip() for c in CALENDAR_IDS_RAW.split(",") if c.strip()]
 CALENDAR_COLORS = json.loads(CALENDAR_COLORS_RAW)
@@ -226,6 +231,7 @@ async def api_state():
             "events": list(state["events"]),
             "timezone": state["timezone"],
             "can_write": state["can_write"],
+            "version": APP_VERSION,
             "last_sync": state["last_sync"],
             "sync_status": state["sync_status"],
             "error": state["error"],
@@ -265,6 +271,13 @@ async def move_event(payload: MovePayload):
             eventId=payload.event_id,
             destination=payload.to_calendar,
         ).execute()
+    except HttpError as e:
+        # Surface Google's own status so the UI can explain the failure
+        # (404 = event gone, 403 = no write access to that calendar, etc).
+        code = getattr(getattr(e, "resp", None), "status", 502)
+        status = code if code in (400, 403, 404, 409) else 502
+        logger.error("move failed for %s (google %s): %s", payload.event_id, code, e)
+        raise HTTPException(status_code=status, detail=f"Move failed: {e}")
     except Exception as e:
         logger.error("move failed for %s: %s", payload.event_id, e)
         raise HTTPException(status_code=502, detail=f"Move failed: {e}")
