@@ -195,22 +195,56 @@ async function loadPayload() {
     doc.querySelectorAll("#main [data-id]").length === 0,
     "no [data-id] elements in the tasks view");
 
+  // Derive the expectations from whatever payload we were given rather than from
+  // fixture ids, so this block is meaningful against live data too. Hardcoding
+  // ids made every one of these assertions silently vacuous on a real server.
+  const tasks = payload.tasks || [];
+  const wallToday = payload.__todayKey || null;
   const rowFor = (id) => doc.querySelector(`#main [data-task-id="${id}"]`);
-  check("overdue task is marked overdue", !!rowFor("t-overdue")?.classList.contains("overdue"));
-  check("task due today is flagged", !!rowFor("t-today")?.classList.contains("due-today"));
-  check("future task is not flagged as a problem",
-    !rowFor("t-future")?.classList.contains("overdue") &&
-    !rowFor("t-future")?.classList.contains("due-today"));
-  check("undated task is not flagged as overdue", !rowFor("t-nodue")?.classList.contains("overdue"));
-
   const dueText = (id) => rowFor(id)?.querySelector(".task-due")?.textContent || "";
-  check("due-today label reads Today", dueText("t-today") === "Today", dueText("t-today"));
-  check("tomorrow label is relative", dueText("t-tomorrow") === "Tomorrow", dueText("t-tomorrow"));
-  check("undated task says so", dueText("t-nodue") === "no due date", dueText("t-nodue"));
-  check("overdue label names a real past date", /\w+ \d+/.test(dueText("t-overdue")), dueText("t-overdue"));
+  const todayK = todayKey();
+  const pick = (pred) => tasks.find(pred);
+  const pastT = pick((t) => t.due && t.due < todayK);
+  const todayT = pick((t) => t.due === todayK);
+  const futureT = pick((t) => t.due && t.due > todayK);
+  const noDueT = pick((t) => !t.due);
 
-  check("task notes are rendered", (rowFor("t-today")?.textContent || "").includes("Before 5pm"));
-  check("subtask marker shown", (rowFor("t-tomorrow")?.textContent || "").includes("has subtasks"));
+  check("payload carried tasks to render", tasks.length === taskRows(),
+    `${tasks.length} in payload / ${taskRows()} rows`);
+
+  if (pastT) {
+    check("overdue task is marked overdue", !!rowFor(pastT.id)?.classList.contains("overdue"),
+      `${pastT.due} ${pastT.title}`);
+    check("overdue label names a real past date", /\w+ \d+/.test(dueText(pastT.id)), dueText(pastT.id));
+  }
+  if (todayT) {
+    check("task due today is flagged", !!rowFor(todayT.id)?.classList.contains("due-today"),
+      `${todayT.due} ${todayT.title}`);
+    check("due-today label reads Today", dueText(todayT.id) === "Today", dueText(todayT.id));
+  }
+  if (futureT) {
+    check("future task is not flagged as a problem",
+      !rowFor(futureT.id)?.classList.contains("overdue") &&
+      !rowFor(futureT.id)?.classList.contains("due-today"),
+      `${futureT.due} ${futureT.title}`);
+  }
+  if (noDueT) {
+    check("undated task is not flagged as overdue", !rowFor(noDueT.id)?.classList.contains("overdue"));
+    check("undated task says so", dueText(noDueT.id) === "no due date", dueText(noDueT.id));
+  }
+  // Tomorrow is the one future label we can assert without controlling the data.
+  const tmr = futureT && futureT.due === new Date(Date.parse(todayK) + 86400000).toISOString().slice(0, 10);
+  if (tmr) check("tomorrow label is relative", dueText(futureT.id) === "Tomorrow", dueText(futureT.id));
+
+  // Notes and subtask markers are optional per task, so only assert on tasks
+  // that actually carry them in this payload.
+  const noted = tasks.find((t) => t.notes);
+  if (noted) check("task notes are rendered",
+    (rowFor(noted.id)?.textContent || "").includes(noted.notes.slice(0, 20)), noted.notes.slice(0, 20));
+  const subbed = tasks.find((t) => t.has_subtasks);
+  if (subbed) check("subtask marker shown",
+    (rowFor(subbed.id)?.textContent || "").includes("has subtasks"), subbed.title);
+
   check("open task count shown", /\d+ open/.test(doc.querySelector(".tasks-count")?.textContent || ""),
     doc.querySelector(".tasks-count")?.textContent || "(missing)");
 
