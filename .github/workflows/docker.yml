@@ -11,7 +11,26 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Gate the image on the jsdom UI tests. These caught nothing for a while
+  # because they lived outside the repo; a reload loop reached 0.4.0/0.4.1
+  # because the version check only ever ran with empty localStorage.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # jsdom 30 requires node ^22.22.2 || ^24.15.0 || >=26.0.0. Bumping the
+      # version here without checking jsdom's engines will fail this job.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
