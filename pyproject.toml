@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wallboard"
-version = "0.2.0"
+version = "0.3.0"
 description = "Wallboard calendar dashboard"
 authors = ["Ryan Jacobchick <rjacobchick@gmail.com>"]
 license = "MIT"
@@ -14,6 +14,7 @@ uvicorn = { version = "^0.30.0", extras = ["standard"] }
 google-api-python-client = "^2.140.0"
 google-auth = "^2.30.0"
 google-auth-oauthlib = "^1.2.0"
+tzdata = "^2024.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"

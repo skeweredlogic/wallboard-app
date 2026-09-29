@@ -3,3 +3,4 @@ uvicorn[standard]>=0.30
 google-api-python-client>=2.140
 google-auth>=2.30
 google-auth-httplib2>=0.2.0
+tzdata>=2024.1

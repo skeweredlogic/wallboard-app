@@ -8,7 +8,7 @@ import http.server
 import urllib.parse
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "client_secret.json"
 REDIRECT_URI = "http://localhost:8080"
@@ -43,19 +43,24 @@ class OAuthHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main():
-    if os.path.exists(TOKEN_FILE):
+    force = "--force" in sys.argv
+    if os.path.exists(TOKEN_FILE) and not force:
         with open(TOKEN_FILE) as f:
             token = json.load(f)
-        if token.get('expiry') and not token['expiry'].startswith('20'):
-            print(f'Token file exists and is valid: {TOKEN_FILE}')
+        granted = set(token.get("scopes") or [])
+        if set(SCOPES).issubset(granted):
+            print(f"Token {TOKEN_FILE} already has the required scopes: {sorted(granted)}")
+            print("Use --force to re-authorize anyway.")
             return
+        print(f"Existing token is missing required scopes ({sorted(set(SCOPES) - granted)}); re-authorizing...")
 
     flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
     flow.redirect_uri = REDIRECT_URI
 
-    # If code provided as argument, use it directly (skip PKCE)
-    if len(sys.argv) > 1:
-        code = sys.argv[1]
+    # If a code is provided as an argument, use it directly (skip PKCE).
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if args:
+        code = args[0]
         # Exchange code directly without PKCE
         flow.fetch_token(code=code, include_client_id=True)
         creds = flow.credentials
