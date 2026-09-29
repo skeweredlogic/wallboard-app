@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wallboard</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #121722;
+    --fg: #e8ecf3;
+    --muted: #8494ab;
+    --accent: #6ea8ff;
+    --border: #1e2634;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    padding: 3.5vmin 4vmin;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 4vmin;
+    padding-bottom: 2.5vmin;
+    border-bottom: 1px solid var(--border);
+  }
+  #clock {
+    font-size: 13vmin;
+    font-weight: 200;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  #date {
+    font-size: 4.5vmin;
+    color: var(--muted);
+    font-weight: 300;
+  }
+  #sync { font-size: 2.2vmin; color: var(--muted); text-align: right; }
+  main { flex: 1; overflow-y: auto; margin-top: 2.5vmin; padding-right: 1vmin; }
+  .day {
+    margin-bottom: 3vmin;
+  }
+  .day-head {
+    display: flex;
+    align-items: baseline;
+    gap: 2vmin;
+    margin-bottom: 1vmin;
+    color: var(--accent);
+    font-size: 3.2vmin;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .day-head .today { }
+  .day-head .count { color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .event {
+    display: flex;
+    align-items: center;
+    gap: 2.5vmin;
+    padding: 1.1vmin 2vmin;
+    margin-bottom: 1vmin;
+    background: var(--panel);
+    border-left: 0.8vmin solid var(--cal-color, var(--accent));
+    border-radius: 0 1vmin 1vmin 0;
+  }
+  .event .time {
+    min-width: 15vmin;
+    font-size: 3vmin;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  .event .title {
+    font-size: 4.2vmin;
+    font-weight: 500;
+    flex: 1;
+  }
+  .event .cal {
+    font-size: 2.4vmin;
+    color: var(--muted);
+    flex-shrink: 0;
+    padding: 0.4vmin 1.4vmin;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  .event.all-day { border-left-style: solid; }
+  .event.all-day .time { color: var(--cal-color); }
+  .empty, .error {
+    color: var(--muted);
+    font-size: 4vmin;
+    text-align: center;
+    margin-top: 14vmin;
+  }
+  .empty .big { font-size: 6vmin; color: var(--fg); margin-bottom: 1vmin; }
+  .error { color: #ff8b8b; font-size: 3vmin; }
+  ::-webkit-scrollbar { width: 1vmin; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 1vmin; }
+</style>
+</head>
+<body>
+  <header>
+    <div id="clock">--:--</div>
+    <div id="date"></div>
+    <div id="sync"></div>
+  </header>
+  <main id="main"></main>
+
+<script>
+const POLL_MS = 60000;
+
+const fmt = new Intl.DateTimeFormat("en-US", {
+  weekday: "long", month: "long", day: "numeric",
+});
+const fmtDay = new Intl.DateTimeFormat("en-US", { weekday: "long" });
+
+function dayKey(iso) {
+  // iso is either "YYYY-MM-DD" (all-day) or full ISO timestamp
+  return iso.slice(0, 10);
+}
+
+function humanDay(key) {
+  const d = new Date(key + "T12:00:00");
+  return fmt.format(d);
+}
+
+function todayKeys(tz) {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const map = {};
+  for (const p of parts) map[p.type] = p.value;
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+function fmtTime(local) {
+  if (local.length === 10) return "all day";
+  const dt = new Date(local);
+  return dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function render(state) {
+  const main = document.getElementById("main");
+  const events = state.events || [];
+  if (!events.length) {
+    main.innerHTML = `<div class="empty"><div class="big">Nothing scheduled</div>next ${state.error ? "" : "14"} days are clear</div>`;
+    return;
+  }
+  const today = todayKeys(state.timezone || "America/New_York");
+  const byDay = {};
+  for (const ev of events) {
+    const key = dayKey(ev.start.local);
+    (byDay[key] = byDay[key] || []).push(ev);
+  }
+  const days = Object.keys(byDay).sort();
+  main.innerHTML = days.map(key => {
+    const list = byDay[key];
+    const head = key === today
+      ? `<span style="color:var(--fg)">Today</span>`
+      : dayKey(new Date().toISOString()) === key ? "" : "";
+    const label = key === today ? "Today" : humanDay(key);
+    const rows = list.map(ev => `
+      <div class="event ${ev.start.all_day ? "all-day" : ""}"
+           style="--cal-color:${ev.color || "#6ea8ff"}">
+        <div class="time">${fmtTime(ev.start.local)}</div>
+        <div class="title">${esc(ev.summary)}</div>
+        <div class="cal">${esc(ev.calendar)}</div>
+      </div>`).join("");
+    return `<div class="day"><div class="day-head">${label} <span class="count">· ${list.length}</span></div>${rows}</div>`;
+  }).join("");
+}
+
+function renderSync(state) {
+  const el = document.getElementById("sync");
+  if (state.sync_status === "error") {
+    el.innerHTML = `<span style="color:#ff8b8b">sync error: ${esc(state.error || "")}</span>`;
+    return;
+  }
+  if (!state.last_sync) { el.textContent = "syncing…"; return; }
+  const mins = Math.floor((Date.now() - new Date(state.last_sync).getTime()) / 60000);
+  el.textContent = `synced ${mins < 1 ? "just now" : mins + "m ago"}`;
+}
+
+function tickNow() {
+  const now = new Date();
+  document.getElementById("clock").textContent = now.toLocaleTimeString("en-US", {
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  document.getElementById("date").textContent = fmt.format(now);
+}
+
+async function poll() {
+  try {
+    const res = await fetch("/api/state");
+    const state = await res.json();
+    render(state);
+    renderSync(state);
+  } catch (e) {
+    document.getElementById("main").innerHTML =
+      `<div class="error">could not reach the wallboard API (${esc(e.message)})</div>`;
+  }
+}
+
+tickNow();
+setInterval(tickNow, 1000);
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

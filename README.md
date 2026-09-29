@@ -31,9 +31,13 @@ vault kv put secret/infra/wallboard-token token_json=@token.json
 | `CALENDAR_IDS` | `""` (all shared) | Comma-separated calendar IDs to display |
 | `CALENDAR_COLORS` | `{}` | JSON mapping of calendar ID → hex color |
 | `CACHE_TTL_SECONDS` | `300` | How often to poll Google Calendar |
+| `LOOKAHEAD_DAYS` | `14` | How many days of upcoming events to fetch |
+| `TIMEZONE` | `America/New_York` | Timezone used to bucket events by day |
+| `INDEX_PATH` | `/app/index.html` | Path to the wallboard HTML page |
 | `PORT` | `8000` | HTTP port to listen on |
 
 ## Endpoints
 
-- `GET /healthz` - Health check (used by probes)
-- `GET /api/state` - Current calendar state (JSON)
+- `GET /` - The wallboard UI (self-refreshing, big-type calendar wall display)
+- `GET /health` / `GET /healthz` - Health check (used by probes)
+- `GET /api/state` - Current calendar state + upcoming events (JSON)
