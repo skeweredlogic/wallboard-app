@@ -312,6 +312,25 @@
   .task-due { font-size: 2.1vmin; color: var(--muted); white-space: nowrap; }
   .task-sub { font-size: 1.7vmin; color: var(--muted); }
   .tasks-note { font-size: 1.9vmin; color: var(--muted); margin-top: 0.3vmin; }
+  .tasks-add { display: flex; gap: 0.8vmin; margin-left: auto; }
+  .tasks-add input {
+    font: inherit; font-size: 1.9vmin; padding: 0.5vmin 1vmin;
+    border-radius: 0.6vmin; border: 0.15vmin solid var(--border);
+    background: var(--panel); color: var(--text); outline: none;
+    width: 26vmin;
+  }
+  .tasks-add input:focus { border-color: var(--accent); }
+  .tasks-add button {
+    font: inherit; font-size: 1.7vmin; padding: 0.4vmin 1.4vmin;
+    border-radius: 0.6vmin; border: none; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  .tasks-add button:hover { opacity: 0.85; }
+  .task-check {
+    width: 2.2vmin; height: 2.2vmin; border-radius: 0.5vmin;
+    border: 0.25vmin solid var(--muted); display: inline-block;
+    accent-color: var(--accent); cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -719,61 +738,131 @@ function tasksEmptyState(msg) {
   </div>`;
 }
 
+function tasksHead() {
+  return `<div class="tasks-head"><div class="tasks-title">Tasks</div>
+    <div class="tasks-count" id="tasks-count"></div>
+    <div class="tasks-add">
+      <input id="task-add-input" type="text" maxlength="300"
+        placeholder="Add a task…" aria-label="New task title" />
+      <button id="task-add-btn">Add</button>
+    </div>
+  </div>`;
+}
+
+function taskRowHtml(t) {
+  let cls = "task-row";
+  let due = "";
+  if (t.due) {
+    due = `<div class="task-due">${esc(taskDueLabel(t.due))}</div>`;
+    if (t.due < todayKey()) cls += " overdue";
+    else if (t.due === todayKey()) cls += " due-today";
+  } else {
+    due = `<div class="task-due">no due date</div>`;
+  }
+  const sub = t.has_subtasks ? `<div class="task-sub">has subtasks</div>` : "";
+  const note = t.notes ? `<div class="task-sub">${esc(t.notes)}</div>` : "";
+  return `<div class="${cls}" data-task-id="${esc(t.id)}">
+    <div><input type="checkbox" class="task-check" /></div>
+    <div><div class="task-title">${esc(t.title)}</div>${sub}${note}</div>
+    ${due}
+  </div>`;
+}
+
 function renderTasks() {
   const d = state.data || {};
   const status = d.tasks_status;
 
-  // Degrade to an explanation instead of an empty list, so a missing scope is
-  // visibly a setup problem rather than "you have no tasks".
-  if (status === "unavailable")
-    return void (document.getElementById("main").innerHTML = tasksEmptyState(
-      "Tasks panel is not connected yet. Re-authorize the wallboard token with the " +
-      "Google Tasks scope to enable it."));
-  if (status === "missing")
-    return void (document.getElementById("main").innerHTML = tasksEmptyState(
-      `No Google Tasks list named "${d.tasks_list || "Wallboard"}" yet. ` +
-      "Create it in Google Tasks and it will appear here within a minute."));
-  if (status === "error")
-    return void (document.getElementById("main").innerHTML = tasksEmptyState(
-      `Could not read tasks: ${d.tasks_error || "unknown error"}`));
-  if (status === "never")
-    return void (document.getElementById("main").innerHTML = tasksEmptyState("Syncing tasks…"));
+  // All task panel behavior (including status checks and errors) lives in this
+  // function so the harness can test it against both the fixture and the live
+  // API. The UI never renders a Tasks tab unless the panel is connected.
 
-  const tasks = d.tasks || [];
-  const listName = d.tasks_list || "Wallboard";
-  if (!tasks.length) {
+  if (status === "unavailable") {
     document.getElementById("main").innerHTML = tasksEmptyState(
-      `Nothing outstanding in "${listName}".`);
+      "Tasks panel is not connected yet. Re-authorize the wallboard token with the " +
+      "Google Tasks scope to enable it.");
+    return;
+  }
+  if (status === "missing") {
+    document.getElementById("main").innerHTML = tasksEmptyState(
+      `No Google Tasks list named "${d.tasks_list || "Wallboard"}" yet. ` +
+      "Create it in Google Tasks and it will appear here within a minute.");
+    return;
+  }
+  if (status === "error") {
+    document.getElementById("main").innerHTML = tasksEmptyState(
+      `Could not read tasks: ${d.tasks_error || "unknown error"}`);
+    return;
+  }
+  if (status === "never") {
+    document.getElementById("main").innerHTML = tasksEmptyState("Syncing tasks…");
     return;
   }
 
-  const today = todayKey();
-  const rows = tasks.map(t => {
-    let cls = "task-row";
-    let due = "";
-    if (t.due) {
-      due = `<div class="task-due">${esc(taskDueLabel(t.due))}</div>`;
-      if (t.due < today) cls += " overdue";
-      else if (t.due === today) cls += " due-today";
-    } else {
-      due = `<div class="task-due">no due date</div>`;
-    }
-    const sub = t.has_subtasks ? `<div class="task-sub">has subtasks</div>` : "";
-    const note = t.notes ? `<div class="task-sub">${esc(t.notes)}</div>` : "";
-    return `<div class="${cls}" data-task-id="${esc(t.id)}">
-      <div><span class="task-box"></span></div>
-      <div><div class="task-title">${esc(t.title)}</div>${sub}${note}</div>
-      ${due}
-    </div>`;
-  }).join("");
+  // At this point the panel is connected and has a task list, but tasks may be
+  // empty. Always render the head (title, count, add input) so tests can assert
+  // on its presence and the count is accurate.
+  const tasks = d.tasks || [];
+  const listName = d.tasks_list || "Wallboard";
 
-  document.getElementById("main").innerHTML = `<div class="tasks-wrap">
-    <div class="tasks-head">
-      <div class="tasks-title">${esc(listName)}</div>
-      <div class="tasks-count">${tasks.length} open</div>
-    </div>
-    ${rows}
-  </div>`;
+  const rows = tasks.map(t => taskRowHtml(t)).join("");
+  document.getElementById("main").innerHTML =
+    tasksHead() + `<div class="tasks-wrap">${rows}</div>`;
+
+  // Populate the open task count
+  const countEl = document.getElementById("tasks-count");
+  if (countEl) countEl.textContent = `${tasks.length} open`;
+
+// Wire up the add input and all task checkboxes.
+  _wireAdd();
+  _wireChecks();
+}
+
+function _wireAdd() {
+  const input = document.getElementById("task-add-input");
+  const btn = document.getElementById("task-add-btn");
+  if (!input || !btn) return;
+  const doAdd = async () => {
+    const title = input.value.trim();
+    if (!title) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({title}),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      input.value = "";
+      await poll();
+    } catch (e) {
+      btn.disabled = false;
+      document.getElementById("main").innerHTML = tasksEmptyState(
+        `Could not add task: ${e.message}`);
+    }
+  };
+  btn.onclick = doAdd;
+  input.onkeydown = (e) => { if (e.key === "Enter") doAdd(); };
+}
+
+function _wireChecks() {
+  document.querySelectorAll(".task-check").forEach((cb) => {
+    cb.onclick = async (e) => {
+      e.stopPropagation();
+      const row = cb.closest(".task-row");
+      const id = row?.dataset.taskId;
+      if (!id) return;
+      cb.disabled = true;
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(id)}/complete`,
+          {method: "POST"});
+        if (!res.ok) throw new Error(`${res.status}`);
+        await poll();
+      } catch (e) {
+        cb.disabled = false;
+        row.classList.add("overdue");
+      }
+    };
+  });
 }
 
 /* =========================================================================
