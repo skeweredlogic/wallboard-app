@@ -252,6 +252,37 @@ async function loadPayload() {
   check("open task count shown", /\d+ open/.test(doc.querySelector(".tasks-count")?.textContent || ""),
     doc.querySelector(".tasks-count")?.textContent || "(missing)");
 
+  // --- create-task dialog -------------------------------------------------
+  // Deliberately never clicks confirm with a real title: this suite also runs
+  // against the live server, and a test must not put tasks in the household
+  // list. Validation and dismissal are the safe things to assert.
+  const createBtn = doc.getElementById("task-create-btn");
+  check("create task button present", !!createBtn, createBtn?.textContent || "(missing)");
+  check("create task button is labelled", /\+\s*create task/i.test(createBtn?.textContent || ""));
+  check("no inline task input on the list",
+    !doc.getElementById("task-add-input"), "field moved into the dialog");
+
+  check("dialog hidden before opening", doc.getElementById("modal").hidden === true);
+  click(createBtn);
+  check("create button opens the dialog", doc.getElementById("modal").hidden === false);
+  check("dialog has a title field", !!doc.getElementById("task-new-title"));
+  check("dialog has a confirm control", !!doc.getElementById("task-confirm"));
+  check("dialog has a cancel control", !!doc.getElementById("task-cancel"));
+  check("dialog title field takes focus", doc.activeElement?.id === "task-new-title",
+    doc.activeElement?.id || "(none)");
+
+  // Submitting nothing must refuse without reaching the API.
+  click(doc.getElementById("task-confirm"));
+  await new Promise((r) => setTimeout(r, 50));
+  check("empty submit is refused", /title first/i.test(doc.getElementById("task-form-msg")?.textContent || ""),
+    doc.getElementById("task-form-msg")?.textContent || "(no message)");
+  check("refused submit keeps the dialog open", doc.getElementById("modal").hidden === false);
+
+  click(doc.getElementById("task-cancel"));
+  check("cancel closes the dialog", doc.getElementById("modal").hidden === true);
+  check("list still rendered after the dialog", taskRows() === (payload.tasks || []).length,
+    `${taskRows()} rows`);
+
   // Chrome that does not apply to a task list must be hidden.
   check("calendar filters hidden on tasks view", doc.getElementById("filters").hidden === true);
   check("date stepper hidden on tasks view", doc.querySelector(".nav").hidden === true);

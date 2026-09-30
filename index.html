@@ -312,20 +312,34 @@
   .task-due { font-size: 2.1vmin; color: var(--muted); white-space: nowrap; }
   .task-sub { font-size: 1.7vmin; color: var(--muted); }
   .tasks-note { font-size: 1.9vmin; color: var(--muted); margin-top: 0.3vmin; }
-  .tasks-add { display: flex; gap: 0.8vmin; margin-left: auto; }
-  .tasks-add input {
-    font: inherit; font-size: 1.9vmin; padding: 0.5vmin 1vmin;
-    border-radius: 0.6vmin; border: 0.15vmin solid var(--border);
-    background: var(--panel); color: var(--text); outline: none;
-    width: 26vmin;
+  /* Creating a task goes through a modal, not a field parked on the wall: the
+     list is read-only glanceable surface and a stray Enter should not be able
+     to add a half-typed task to the household list. */
+  .tasks-add-btn {
+    font: inherit; font-size: 1.9vmin; padding: 0.7vmin 1.8vmin;
+    border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
+    cursor: pointer; margin-left: auto;
+    background: var(--panel); color: var(--accent);
   }
-  .tasks-add input:focus { border-color: var(--accent); }
-  .tasks-add button {
-    font: inherit; font-size: 1.7vmin; padding: 0.4vmin 1.4vmin;
-    border-radius: 0.6vmin; border: none; cursor: pointer;
-    background: var(--accent); color: #fff;
+  .tasks-add-btn:hover { background: var(--panel-2); border-color: var(--accent); }
+  .task-form { display: flex; flex-direction: column; gap: 1.2vmin; margin-top: 2.4vmin; }
+  .task-form textarea {
+    font: inherit; font-size: 2.3vmin; padding: 1.2vmin 1.4vmin; line-height: 1.35;
+    border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
+    background: var(--panel-2); color: var(--fg); outline: none;
+    resize: vertical; min-height: 8vmin; width: 100%;
   }
-  .tasks-add button:hover { opacity: 0.85; }
+  .task-form textarea:focus { border-color: var(--accent); }
+  .task-form-actions { display: flex; justify-content: flex-end; gap: 1vmin; }
+  .task-form-actions button {
+    font: inherit; font-size: 1.9vmin; padding: 0.8vmin 2vmin;
+    border-radius: 0.7vmin; cursor: pointer; border: 0.15vmin solid var(--border);
+    background: var(--panel-2); color: var(--fg);
+  }
+  .task-form-actions button:disabled { opacity: 0.5; cursor: default; }
+  .task-form-actions .task-confirm { background: var(--accent); color: #061021; border-color: var(--accent); font-weight: 600; }
+  .task-form-msg { font-size: 1.9vmin; min-height: 2.2vmin; }
+  .task-form-msg.err { color: #ff8b8b; }
   .task-check {
     width: 2.2vmin; height: 2.2vmin; border-radius: 0.5vmin;
     border: 0.25vmin solid var(--muted); display: inline-block;
@@ -741,11 +755,7 @@ function tasksEmptyState(msg) {
 function tasksHead() {
   return `<div class="tasks-head"><div class="tasks-title">Tasks</div>
     <div class="tasks-count" id="tasks-count"></div>
-    <div class="tasks-add">
-      <input id="task-add-input" type="text" maxlength="300"
-        placeholder="Add a task…" aria-label="New task title" />
-      <button id="task-add-btn">Add</button>
-    </div>
+    <button class="tasks-add-btn" id="task-create-btn" type="button">+ Create task</button>
   </div>`;
 }
 
@@ -818,30 +828,80 @@ function renderTasks() {
 }
 
 function _wireAdd() {
-  const input = document.getElementById("task-add-input");
-  const btn = document.getElementById("task-add-btn");
-  if (!input || !btn) return;
-  const doAdd = async () => {
+  const btn = document.getElementById("task-create-btn");
+  if (btn) btn.onclick = openTaskCreate;
+}
+
+/* Create-task dialog. Shares #modal with the event detail card, so Escape and
+   the backdrop already work; the contents and the handlers are replaced. */
+function openTaskCreate() {
+  document.getElementById("modal-card").innerHTML = `
+    <button class="modal-x" id="modal-x">&times;</button>
+    <h2>New task</h2>
+    <div class="task-form">
+      <label class="ro" for="task-new-title">What needs doing?</label>
+      <textarea id="task-new-title" maxlength="300" rows="3"
+        placeholder="e.g. Pick up the dry cleaning"></textarea>
+      <div class="task-form-msg" id="task-form-msg"></div>
+      <div class="task-form-actions">
+        <button id="task-cancel" type="button">Cancel</button>
+        <button class="task-confirm" id="task-confirm" type="button">Create task</button>
+      </div>
+    </div>`;
+
+  const modal = document.getElementById("modal");
+  modal.hidden = false;
+
+  const input = document.getElementById("task-new-title");
+  const msg = document.getElementById("task-form-msg");
+  const confirm = document.getElementById("task-confirm");
+  input.focus();
+
+  const close = () => closeModal();
+  document.getElementById("modal-x").onclick = close;
+  document.getElementById("modal-backdrop").onclick = close;
+  document.getElementById("task-cancel").onclick = close;
+
+  const submit = async () => {
     const title = input.value.trim();
-    if (!title) return;
-    btn.disabled = true;
+    if (!title) {
+      msg.className = "task-form-msg err";
+      msg.textContent = "Give the task a title first.";
+      input.focus();
+      return;
+    }
+    confirm.disabled = true;
+    msg.className = "task-form-msg";
+    msg.textContent = "Creating…";
     try {
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({title}),
       });
-      if (!res.ok) throw new Error(`${res.status}`);
-      input.value = "";
+      if (!res.ok) {
+        let d = String(res.status);
+        try { d = (await res.json()).detail || d; } catch (e) {}
+        throw new Error(d);
+      }
+      closeModal();
       await poll();
     } catch (e) {
-      btn.disabled = false;
-      document.getElementById("main").innerHTML = tasksEmptyState(
-        `Could not add task: ${e.message}`);
+      // Stay in the dialog with the text intact. Replacing the page here would
+      // throw away the list and the half-typed title, which is what the inline
+      // input used to do.
+      confirm.disabled = false;
+      msg.className = "task-form-msg err";
+      msg.textContent = "✕ " + e.message;
+      input.focus();
     }
   };
-  btn.onclick = doAdd;
-  input.onkeydown = (e) => { if (e.key === "Enter") doAdd(); };
+
+  confirm.onclick = submit;
+  // Enter submits; Shift+Enter is a newline. The wall gets typed at.
+  input.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+  };
 }
 
 function _wireChecks() {
