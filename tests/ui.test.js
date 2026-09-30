@@ -284,29 +284,37 @@ const page = (expr) => window.eval(expr);
     doc.querySelector(".tasks-count")?.textContent || "(missing)");
 
   // --- one add control, every view -----------------------------------------
-  // A floating + in the bottom right, for the whole app. The glyph never
-  // changes; only the caption under it and the dialog it opens follow the view.
+  // A floating + in the bottom right, for the whole app. Regression guard: this
+  // button used to carry a text label, and because it was right-anchored inside
+  // a wrapper sized by its contents, a longer label on one view ("Create event")
+  // than another ("Create task") shifted the button sideways. The invariant now
+  // is that the button has a fixed size, is anchored directly, and contains
+  // nothing but the glyph.
   const addBtn = doc.getElementById("add-btn");
-  const addCap = doc.getElementById("add-cap");
   check("add button present", !!addBtn, addBtn?.textContent || "(missing)");
   check("add button is a plain plus glyph", (addBtn?.textContent || "").trim() === "+",
     JSON.stringify(addBtn?.textContent || "(missing)"));
+  check("add button carries no visible label", !doc.getElementById("add-cap"),
+    "label removed so label length cannot move the button");
+  check("add button has no wrapper that could size it",
+    addBtn?.parentElement?.tagName === "BODY", `parent=${addBtn?.parentElement?.tagName}`);
   check("add button is a floating control, not in the toolbar",
-    !!doc.querySelector(".fab-wrap") && !doc.querySelector(".toolbar #add-btn"),
-    ".fab-wrap sits outside .toolbar");
+    !doc.querySelector(".toolbar #add-btn"), ".fab is outside .toolbar");
   check("fab is anchored bottom right",
-    /\.fab-wrap\s*\{[^}]*position:\s*fixed/.test(html) && /\.fab-wrap\s*\{[^}]*right:/.test(html)
-      && /\.fab-wrap\s*\{[^}]*bottom:/.test(html),
-    (html.match(/\.fab-wrap\s*\{[^}]*\}/) || ["(not found)"])[0].replace(/\s+/g, " "));
-  check("fab is round", /\.fab\s*\{[^}]*border-radius:\s*50%/.test(html));
-  check("fab is large enough to hit on a wall display",
-    /\.fab\s*\{[^}]*min-width:\s*\d{2,}px/.test(html) && /\.fab\s*\{[^}]*min-height:\s*\d{2,}px/.test(html),
+    /\.fab\s*\{[^}]*position:\s*fixed/.test(html) && /\.fab\s*\{[^}]*right:/.test(html)
+      && /\.fab\s*\{[^}]*bottom:/.test(html),
     (html.match(/\.fab\s*\{[^}]*\}/) || ["(not found)"])[0].replace(/\s+/g, " "));
-  check("add button is on the tasks view", /^create task$/i.test(addCap?.textContent || ""),
-    addCap?.textContent || "(missing)");
+  check("fab is round", /\.fab\s*\{[^}]*border-radius:\s*50%/.test(html));
+  // A fixed width and height is what makes the position independent of content.
+  check("fab has an explicit fixed size",
+    /\.fab\s*\{[^}]*width:\s*[^;]+;/.test(html) && /\.fab\s*\{[^}]*height:\s*[^;]+;/.test(html));
+  check("fab is large enough to hit on a wall display",
+    /\.fab\s*\{[^}]*min-width:\s*\d{2,}px/.test(html) && /\.fab\s*\{[^}]*min-height:\s*\d{2,}px/.test(html));
   check("add button is on every view, not per-view",
     !doc.getElementById("task-create-btn") && !doc.getElementById("add-event-btn"),
     "single #add-btn");
+  check("add button wording still reaches assistive tech",
+    !!addBtn?.getAttribute("aria-label"), addBtn?.getAttribute("aria-label") || "(none)");
   check("no inline task input on the list",
     !doc.getElementById("task-add-input"), "field moved into the dialog");
 
@@ -349,16 +357,16 @@ const page = (expr) => window.eval(expr);
     doc.getElementById("add-btn") === addBtn, "same element across views");
 
   click(tab("agenda"));
-  check("add caption relabels on a calendar view", /^create event$/i.test(addCap?.textContent || ""),
-    addCap?.textContent || "(missing)");
-  check("fab glyph never changes", (addBtn?.textContent || "").trim() === "+",
+  check("fab glyph is identical on a calendar view", (addBtn?.textContent || "").trim() === "+",
     JSON.stringify(addBtn?.textContent || "(missing)"));
-  check("fab stays visible on a calendar view",
-    doc.querySelector(".fab-wrap")?.hidden === false, `hidden=${doc.querySelector(".fab-wrap")?.hidden}`);
-  check("captions are parallel across views",
-    /^create (event|task)$/i.test(addCap?.textContent || ""), addCap?.textContent || "(missing)");
-  check("add button is the same element on every view", doc.getElementById("add-btn") === addBtn,
+  check("fab is the same element on every view", doc.getElementById("add-btn") === addBtn,
     "single #add-btn");
+  check("fab stays visible on a calendar view", addBtn?.hidden === false,
+    `hidden=${addBtn?.hidden}`);
+  // Nothing about the button may differ between the two views except invisible
+  // attributes, or it can move under the finger that is reaching for it.
+  check("fab carries no label whose length could change between views",
+    (addBtn?.textContent || "").length <= 1, JSON.stringify(addBtn?.textContent || ""));
 
   click(addBtn);
   check("add button opens the event dialog", doc.getElementById("modal").hidden === false);

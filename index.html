@@ -336,19 +336,18 @@
   .task-form-msg { font-size: 1.9vmin; min-height: 2.2vmin; }
   .task-form-msg.err { color: #ff8b8b; }
   /* Floating add control, bottom right, the way a phone calendar does it. One
-     control for the whole app: the glyph is always "+", and only the caption
-     and the dialog it opens follow the view. Sized off vmin so it stays a sane
-     target on both a wall display and a phone. */
-  .fab-wrap {
-    position: fixed; right: 2.4vmin; bottom: 2.4vmin; z-index: 20;
-    display: flex; flex-direction: column; align-items: center; gap: 0.6vmin;
-    /* Keep the caption legible if it ever has to sit over content. */
-    pointer-events: none;
-  }
+     control for the whole app, and deliberately nothing but the icon: a text
+     label here sizes the control, and any difference in label length between
+     views (task vs event) would shift the button under the user's finger. So it
+     carries a fixed size, is anchored directly rather than through a wrapper,
+     and gets its wording from aria-label/title instead of from visible text.
+     Sized off vmin with a px floor so it stays a sane target on a wall display
+     and on a phone. */
   .fab {
-    pointer-events: auto;
+    position: fixed; right: 2.4vmin; bottom: 2.4vmin; z-index: 20;
     width: 7.6vmin; height: 7.6vmin; min-width: 52px; min-height: 52px;
-    border-radius: 50%; border: none; cursor: pointer;
+    flex: none; box-sizing: border-box;
+    border-radius: 50%; border: none; cursor: pointer; padding: 0;
     background: var(--accent); color: #061021;
     font-size: 4.6vmin; line-height: 1; font-weight: 400;
     display: flex; align-items: center; justify-content: center;
@@ -357,11 +356,6 @@
   .fab:hover { filter: brightness(1.1); }
   .fab:active { transform: scale(0.94); }
   .fab:focus-visible { outline: 0.3vmin solid var(--fg); outline-offset: 0.3vmin; }
-  .fab-cap {
-    pointer-events: none; color: var(--fg); font-size: 1.5vmin;
-    background: rgba(0, 0, 0, 0.45); padding: 0.3vmin 0.9vmin; border-radius: 999px;
-    white-space: nowrap;
-  }
   /* main is a flex row holding a scrolling child, so bottom padding here keeps
      the last row from parking permanently underneath the floating button. */
   main { padding-bottom: 11vmin; }
@@ -409,13 +403,13 @@
 
   <main id="main"></main>
 
-  <!-- Floating add control, bottom right, the way a phone calendar does it. It
-       is one control for the whole app: the glyph never changes, only the
-       caption under it and the dialog it opens, both driven by the view. -->
-  <div class="fab-wrap">
-    <button class="fab" id="add-btn" type="button" aria-label="Create an event">+</button>
-    <div class="fab-cap" id="add-cap">Create event</div>
-  </div>
+  <!-- Floating add control, bottom right, the way a phone calendar does it. One
+       control for the whole app and nothing but the icon: an earlier version put
+       a text label beside it, but the wrapper was right-anchored and sized by its
+       contents, so a longer word ("Create event" vs "Create task") shifted the
+       button sideways. The button is now a direct fixed-position child of the
+       page with an explicit size, so nothing about the current view can move it. -->
+  <button class="fab" id="add-btn" type="button" aria-label="Create an event">+</button>
 
   <div class="modal" id="modal" hidden>
     <div class="modal-backdrop" id="modal-backdrop"></div>
@@ -1203,18 +1197,16 @@ function currentView() {
   return VIEWS[state.view] || VIEWS.agenda;
 }
 
-/* The one add control. Only the caption and the dialog follow the view, so the
-   button itself never moves between tabs. */
+/* The one add control. Its geometry is fixed by the stylesheet and its only
+   text is the "+" glyph, so no view can move or resize it. The wording that
+   used to be visible lives in aria-label/title, which costs no layout. */
 function syncAddButton(view) {
   const btn = document.getElementById("add-btn");
-  const cap = document.getElementById("add-cap");
-  const wrap = document.querySelector(".fab-wrap");
   if (!view.add) {
-    wrap.hidden = true;
+    btn.hidden = true;
     return;
   }
-  wrap.hidden = false;
-  cap.textContent = view.add.label;
+  btn.hidden = false;
   btn.setAttribute("aria-label", view.add.label);
   btn.title = view.add.label;
 }
