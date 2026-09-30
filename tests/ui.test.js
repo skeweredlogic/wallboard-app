@@ -202,7 +202,7 @@ const page = (expr) => window.eval(expr);
               render: typeof x.render === "function",
               // A view may opt out of the add control, but the opt-out has to be
               // an explicit boolean. A view with no fab key at all still gets
-              // the chooser, which is the right default for a new tab.
+              // the menu, which is the right default for a new tab.
               fab: x.fab === undefined || typeof x.fab === "boolean",
               // The old per-view add:{label,run} entry is gone on purpose:
               // the button no longer infers event vs task from the tab.
@@ -212,12 +212,12 @@ const page = (expr) => window.eval(expr);
   check("every view entry is fully wired", bad.length === 0,
     bad.length ? `incomplete: ${bad.join(", ")}` : `${views.length} views: ${views.join(", ")}`);
 
-  // Every current view keeps the chooser, and the chooser's action list is not
+  // Every current view keeps the add menu, and its action list is not
   // view-dependent, so a future Home tab gets a working + with no new code.
   const fabless = views.filter((v) => page(`VIEWS[${JSON.stringify(v)}].fab === false`));
   check("every view offers the add control", fabless.length === 0,
     fabless.length ? `opted out: ${fabless.join(", ")}` : `${views.length} views`);
-  check("the chooser is the same from every view",
+  check("the add menu is the same from every view",
     page(`Array.isArray(ADD_ACTIONS) && ADD_ACTIONS.length === 2`)
     && !/view\.add\b|\.add\.run\(/.test(html),
     "one action list, no per-view branch");
@@ -336,28 +336,65 @@ const page = (expr) => window.eval(expr);
   check("dialog hidden before opening", doc.getElementById("modal").hidden === true);
   click(addBtn);
 
-  // --- the chooser the + opens ---------------------------------------------
+  // --- the add menu ---------------------------------------------------------
+  // The + opens a translucent panel docked above the button, NOT a modal. It
+  // must not dim or cover the calendar, so the invariant to protect is that
+  // #modal is never revealed by it.
+  const menu = doc.getElementById("add-menu");
+  check("add button opens something", !!menu && menu.hidden === false, `hidden=${menu?.hidden}`);
+  check("add menu is not a modal", doc.getElementById("modal").hidden === true,
+    "a modal would dim and cover the calendar");
+  // Assert it lives outside the modal entirely, rather than asserting the modal
+  // is empty: earlier in the suite may legitimately have left a dialog's markup
+  // in there, and that has nothing to do with what the + button does.
+  check("add menu is not inside the modal", !doc.getElementById("modal").contains(menu),
+    `menu inside #modal=${doc.getElementById("modal").contains(menu)}`);
+  check("add menu is a menu, not a listbox", menu?.getAttribute("role") === "menu",
+    menu?.getAttribute("role") || "(no role)");
+  check("add menu is anchored above the + button, bottom right",
+    /\.add-menu\s*\{[^}]*position:\s*fixed/.test(html)
+    && /\.add-menu\s*\{[^}]*right:\s*2\.4vmin/.test(html)
+    && /\.add-menu\s*\{[^}]*bottom:\s*calc\(2\.4vmin \+ max\(52px, 7\.6vmin\)/.test(html),
+    "bottom = FAB bottom + FAB height + one gap, so the gap cannot drift");
+  check("add menu sits at the same right edge as the button",
+    (html.match(/right:\s*2\.4vmin/g) || []).length >= 2, "button and menu share an inset");
+  check("add menu is translucent so the wall reads through it",
+    /\.add-menu\s*\{[^}]*background:\s*rgba\([^)]*0\.\d+\)/.test(html)
+    && /backdrop-filter:\s*blur/.test(html),
+    "translucent + blur instead of an opaque card");
+  check("add menu cannot grow wider than a phone screen",
+    /\.add-menu\s*\{[^}]*max-width:\s*min\(\s*86vw/.test(html));
+  check("add menu is a sibling of the button, not nested in it",
+    menu?.parentElement === addBtn?.parentElement
+    && !addBtn?.contains(menu), `menu parent=${menu?.parentElement?.tagName}`);
+
   // The button does NOT infer event vs task from the tab. It offers both and lets
   // the user choose, because the same intent ("put that on the calendar") comes
   // from every view and a future Home tab has no calendar context to infer from.
-  check("add button opens something", doc.getElementById("modal").hidden === false);
-  check("add button opens a chooser, not a dialog directly",
+  check("add menu offers both actions",
     !!doc.getElementById("add-event") && !!doc.getElementById("add-task"),
-    "chooser offers both actions");
-  check("chooser has no task field yet", !doc.getElementById("task-new-title"),
-    "chooser is a menu, the form comes after the pick");
-  check("chooser has no event field yet", !doc.getElementById("ev-title"),
-    "chooser is a menu, the form comes after the pick");
-  check("chooser labels both actions",
+    "menu offers both actions");
+  check("menu items are marked up as menu items",
+    doc.getElementById("add-event")?.getAttribute("role") === "menuitem"
+    && doc.getElementById("add-task")?.getAttribute("role") === "menuitem");
+  check("menu has no task field yet", !doc.getElementById("task-new-title"),
+    "the form comes after the pick");
+  check("menu has no event field yet", !doc.getElementById("ev-title"),
+    "the form comes after the pick");
+  check("menu labels both actions",
     /new event/i.test(doc.getElementById("add-event")?.textContent || "")
     && /new task/i.test(doc.getElementById("add-task")?.textContent || ""));
-  check("chooser actions are enabled when both are possible",
+  check("menu actions are enabled when both are possible",
     doc.getElementById("add-event")?.disabled === false
     && doc.getElementById("add-task")?.disabled === false);
-  check("chooser can be dismissed with the x",
-    !!doc.getElementById("modal-x"), "same overlay as the dialogs");
-  check("chooser focuses its first action", doc.activeElement?.id === "add-event",
+  check("menu focuses its first action", doc.activeElement?.id === "add-event",
     doc.activeElement?.id || "(none)");
+  check("button reports the menu as expanded",
+    addBtn?.getAttribute("aria-expanded") === "true", addBtn?.getAttribute("aria-expanded") || "(none)");
+  check("button advertises a menu, not a dialog",
+    addBtn?.getAttribute("aria-haspopup") === "menu", addBtn?.getAttribute("aria-haspopup") || "(none)");
+  check("button points at the menu it controls",
+    addBtn?.getAttribute("aria-controls") === "add-menu", addBtn?.getAttribute("aria-controls") || "(none)");
 
   // An action that cannot run stays visible and says why, instead of silently
   // disappearing (which reads as "this app cannot make events") or opening a
@@ -379,16 +416,31 @@ const page = (expr) => window.eval(expr);
   page("state.data.can_write = " + JSON.stringify(!!payload.can_write)
     + "; state.data.tasks_status = " + JSON.stringify(payload.tasks_status)
     + "; openAddChooser()");
-  check("chooser re-enables once the cause clears",
+  check("menu re-enables once the cause clears",
     doc.getElementById("add-event")?.disabled === false
     && doc.getElementById("add-task")?.disabled === false);
 
-  // The chooser is view-independent: the same two options from a calendar tab.
-  click(doc.getElementById("modal-x"));
-  check("chooser x closes it", doc.getElementById("modal").hidden === true);
+  // No backdrop exists, so these three stand in for it.
+  click(addBtn);
+  check("pressing the button again puts the menu away", menu?.hidden === true, `hidden=${menu?.hidden}`);
+  check("collapsed menu clears its contents",
+    !(menu?.children.length), `${menu?.children.length} child node(s)`);
+  check("button reports collapsed after the menu closes",
+    addBtn?.getAttribute("aria-expanded") === "false");
+  check("closing the menu still leaves no modal", doc.getElementById("modal").hidden === true);
 
   click(addBtn);
-  check("chooser offers the same actions on a calendar view",
+  doc.getElementById("main").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  check("clicking outside dismisses the menu", menu?.hidden === true, `hidden=${menu?.hidden}`);
+
+  click(addBtn);
+  doc.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  check("Escape dismisses the menu", menu?.hidden === true, `hidden=${menu?.hidden}`);
+  check("Escape with the menu open does not also touch the modal",
+    doc.getElementById("modal").hidden === true);
+
+  click(addBtn);
+  check("menu offers the same actions on a calendar view",
     !!doc.getElementById("add-event") && !!doc.getElementById("add-task"), "identical list");
 
   // Picking the task opens the task form.
@@ -443,10 +495,10 @@ const page = (expr) => window.eval(expr);
   check("field labels stay legible on a phone", /\.ro\s*\{[^}]*font-size:\s*max\(/.test(html));
   check("form buttons have a finger-sized height",
     /\.task-form-actions button\s*\{[^}]*min-height:\s*\d{2,}px/.test(html));
-  check("chooser rows have a finger-sized height",
-    /\.chooser-item\s*\{[^}]*min-height:\s*max\(\s*\d{2,}px/.test(html));
-  check("chooser labels are legible on a phone",
-    /\.ci-label\s*\{[^}]*font-size:\s*max\(\s*1[6-9]px/.test(html));
+  check("menu rows have a finger-sized height",
+    /\.menu-item\s*\{[^}]*min-height:\s*max\(\s*\d{2,}px/.test(html));
+  check("menu labels are legible on a phone",
+    /\.mi-label\s*\{[^}]*font-size:\s*max\(\s*1[6-9]px/.test(html));
   check("text inflation is pinned so landscape does not drift",
     /-webkit-text-size-adjust:\s*100%/.test(html));
 
@@ -461,7 +513,7 @@ const page = (expr) => window.eval(expr);
   // Same discipline as the task dialog: never confirm with a real title, since
   // this suite also runs against the live server and an event lands on the real
   // family calendar. Assert structure, validation and dismissal only.
-  // The event form is reached through the chooser, not from a calendar tab.
+  // The event form is reached through the menu, not from a calendar tab.
   check("add button is still one control on the tasks view",
     doc.getElementById("add-btn") === addBtn, "same element across views");
 
@@ -480,8 +532,8 @@ const page = (expr) => window.eval(expr);
   click(addBtn);
   click(doc.getElementById("add-event"));
   check("choosing an event opens the event dialog", !!doc.getElementById("ev-title"));
-  check("chooser no longer visible once a form is open",
-    !doc.getElementById("add-event"), "chooser is replaced, not stacked");
+  check("menu is replaced by the form once a pick is made",
+    !doc.getElementById("add-event"), "menu closes, form opens in the modal");
   check("dialog heading says event", /new event/i.test(doc.querySelector("#modal-card h2")?.textContent || ""));
   for (const id of ["ev-title", "ev-date", "ev-start", "ev-end", "ev-cal", "ev-desc",
                     "ev-confirm", "ev-cancel", "ev-allday"]) {
