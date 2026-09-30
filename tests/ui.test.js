@@ -256,19 +256,24 @@ const page = (expr) => window.eval(expr);
   check("open task count shown", /\d+ open/.test(doc.querySelector(".tasks-count")?.textContent || ""),
     doc.querySelector(".tasks-count")?.textContent || "(missing)");
 
-  // --- create-task dialog -------------------------------------------------
-  // Deliberately never clicks confirm with a real title: this suite also runs
-  // against the live server, and a test must not put tasks in the household
-  // list. Validation and dismissal are the safe things to assert.
-  const createBtn = doc.getElementById("task-create-btn");
-  check("create task button present", !!createBtn, createBtn?.textContent || "(missing)");
-  check("create task button is labelled", /\+\s*create task/i.test(createBtn?.textContent || ""));
+  // --- one add control, every view -----------------------------------------
+  // The add button lives in the toolbar and never moves. Only its label and the
+  // dialog it opens follow the view, so these checks are really about the label
+  // tracking state.view rather than about two separate controls.
+  const addBtn = doc.getElementById("add-btn");
+  check("add button present", !!addBtn, addBtn?.textContent || "(missing)");
+  check("add button is on the tasks view", /\+\s*create task/i.test(addBtn?.textContent || ""),
+    addBtn?.textContent || "(missing)");
+  check("add button is on every view, not per-view",
+    !doc.getElementById("task-create-btn") && !doc.getElementById("add-event-btn"),
+    "single #add-btn in the toolbar");
   check("no inline task input on the list",
     !doc.getElementById("task-add-input"), "field moved into the dialog");
 
   check("dialog hidden before opening", doc.getElementById("modal").hidden === true);
-  click(createBtn);
-  check("create button opens the dialog", doc.getElementById("modal").hidden === false);
+  click(addBtn);
+  check("add button opens the dialog", doc.getElementById("modal").hidden === false);
+  check("tasks view opens the task dialog", !!doc.getElementById("task-new-title"));
   check("dialog has a title field", !!doc.getElementById("task-new-title"));
   check("dialog has a confirm control", !!doc.getElementById("task-confirm"));
   check("dialog has a cancel control", !!doc.getElementById("task-cancel"));
@@ -298,19 +303,23 @@ const page = (expr) => window.eval(expr);
   // Same discipline as the task dialog: never confirm with a real title, since
   // this suite also runs against the live server and an event lands on the real
   // family calendar. Assert structure, validation and dismissal only.
-  const addEv = doc.getElementById("add-event-btn");
-  check("calendar add button present", !!addEv, addEv?.textContent || "(missing)");
-  check("calendar add button is labelled", /\+\s*new event/i.test(addEv?.textContent || ""));
-  // Assert this while actually parked on the tasks view.
-  click(tab("tasks"));
-  check("calendar add button hidden on tasks view", addEv?.hidden === true,
-    `hidden=${addEv?.hidden}`);
-  click(tab("agenda"));
-  check("calendar add button shown on agenda view", addEv?.hidden === false,
-    `hidden=${addEv?.hidden}`);
+  // Still parked on the tasks view here; switch to a calendar view and check the
+  // same control relabels and retargets.
+  check("add button is still one control on the tasks view",
+    doc.getElementById("add-btn") === addBtn, "same element across views");
 
-  click(addEv);
+  click(tab("agenda"));
+  check("add button relabels on a calendar view", /\+\s*create event/i.test(addBtn?.textContent || ""),
+    addBtn?.textContent || "(missing)");
+  check("add button stays visible on a calendar view", addBtn?.hidden === false,
+    `hidden=${addBtn?.hidden}`);
+  check("labels are parallel across views",
+    /^\+\s*create \w+$/i.test(addBtn?.textContent || ""), addBtn?.textContent || "(missing)");
+
+  click(addBtn);
   check("add button opens the event dialog", doc.getElementById("modal").hidden === false);
+  check("calendar view opens the event dialog, not the task one",
+    !!doc.getElementById("ev-title") && !doc.getElementById("task-new-title"));
   check("dialog heading says event", /new event/i.test(doc.querySelector("#modal-card h2")?.textContent || ""));
   for (const id of ["ev-title", "ev-date", "ev-start", "ev-end", "ev-cal", "ev-desc",
                     "ev-confirm", "ev-cancel", "ev-allday"]) {

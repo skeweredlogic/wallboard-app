@@ -313,15 +313,10 @@
   .task-sub { font-size: 1.7vmin; color: var(--muted); }
   .tasks-note { font-size: 1.9vmin; color: var(--muted); margin-top: 0.3vmin; }
   /* Creating a task goes through a modal, not a field parked on the wall: the
-     list is read-only glanceable surface and a stray Enter should not be able
-     to add a half-typed task to the household list. */
-  .tasks-add-btn {
-    font: inherit; font-size: 1.9vmin; padding: 0.7vmin 1.8vmin;
-    border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
-    cursor: pointer; margin-left: auto;
-    background: var(--panel); color: var(--accent);
-  }
-  .tasks-add-btn:hover { background: var(--panel-2); border-color: var(--accent); }
+     list is a read-only glanceable surface and a stray Enter should not be able
+     to add a half-typed task to the household list. The add control itself now
+     lives in the toolbar (.add-global) so it sits in the same spot on every
+     view; only its label and its target change. */
   .task-form { display: flex; flex-direction: column; gap: 1.2vmin; margin-top: 2.4vmin; }
   .task-form textarea {
     font: inherit; font-size: 2.3vmin; padding: 1.2vmin 1.4vmin; line-height: 1.35;
@@ -393,7 +388,7 @@
       <button id="next" title="Next">&rsaquo;</button>
       <button class="today" id="today">Today</button>
     </div>
-    <button class="add-global" id="add-event-btn" type="button">+ New event</button>
+    <button class="add-global" id="add-btn" type="button">+ Create event</button>
   </div>
 
   <div class="filters" id="filters"></div>
@@ -782,7 +777,6 @@ function tasksEmptyState(msg) {
 function tasksHead() {
   return `<div class="tasks-head"><div class="tasks-title">Tasks</div>
     <div class="tasks-count" id="tasks-count"></div>
-    <button class="tasks-add-btn" id="task-create-btn" type="button">+ Create task</button>
   </div>`;
 }
 
@@ -855,8 +849,8 @@ function renderTasks() {
 }
 
 function _wireAdd() {
-  const btn = document.getElementById("task-create-btn");
-  if (btn) btn.onclick = openTaskCreate;
+  /* Intentionally empty. The add control lives in the toolbar, not in any one
+     view, so there is nothing per-view to re-wire after a render. */
 }
 
 /* Create-task dialog. Shares #modal with the event detail card, so Escape and
@@ -1140,9 +1134,12 @@ function render() {
   const isTasks = state.view === "tasks";
   document.getElementById("filters").hidden = isTasks;
   document.querySelector(".nav").hidden = isTasks;
-  // One add control per view: the Tasks view has its own button in the list
-  // header, so the toolbar one only appears on the calendar views.
-  document.getElementById("add-event-btn").hidden = isTasks;
+  // One add control for the whole app, in one place, on every view. Only the
+  // label and the dialog it opens follow the view, so the control never moves.
+  const addBtn = document.getElementById("add-btn");
+  addBtn.textContent = isTasks ? "+ Create task" : "+ Create event";
+  addBtn.setAttribute("aria-label",
+    isTasks ? "Create a task" : "Create an event");
   if (!isTasks) renderFilters();
   if (state.view === "agenda") renderAgenda();
   else if (state.view === "week") renderWeek();
@@ -1233,7 +1230,8 @@ document.getElementById("filters").addEventListener("click", e => {
 document.getElementById("prev").onclick = () => { step(-1); render(); };
 document.getElementById("next").onclick = () => { step(1); render(); };
 document.getElementById("today").onclick = () => { state.cursor = todayKey(); render(); };
-document.getElementById("add-event-btn").onclick = openEventCreate;
+document.getElementById("add-btn").onclick = () =>
+  state.view === "tasks" ? openTaskCreate() : openEventCreate();
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeModal();
   else if (e.key === "ArrowLeft") { step(-1); render(); }
