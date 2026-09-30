@@ -402,6 +402,15 @@
     backdrop-filter: blur(14px) saturate(1.3);
     box-shadow: 0 0.6vmin 2vmin rgba(0, 0, 0, 0.5);
   }
+  /* The panel must actually disappear when collapsed. The global [hidden] guard
+     further up this stylesheet is specificity (0,1,0), the same as .add-menu
+     above, so the later `display: flex` was silently winning and the border and
+     background stayed on screen after the menu closed. Qualifying with the
+     attribute makes this (0,2,0) and immune to source order, which is the only
+     kind of rule that stays correct when someone appends CSS to the end later.
+     Same reason .nav is unaffected: its display rule happens to sit above the
+     guard. Do not remove this. */
+  .add-menu[hidden] { display: none; }
   .menu-item {
     display: flex; align-items: center; gap: 1.1vmin; width: 100%;
     min-height: max(46px, 5.4vmin); padding: max(8px, 0.9vmin) max(10px, 1.1vmin);

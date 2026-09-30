@@ -420,6 +420,66 @@ const page = (expr) => window.eval(expr);
     doc.getElementById("add-event")?.disabled === false
     && doc.getElementById("add-task")?.disabled === false);
 
+  // The menu must actually be a sibling of the button and positioned relative to
+  // the viewport, otherwise "above the + button" is just a claim in a comment.
+  // Asserted on the live-served base rule too, since the touch media block
+  // overrides bottom and could otherwise mask a broken base rule.
+  // There are two .add-menu rules: the base one and a short touch override inside
+  // the max-width media block. The base is the one carrying the positioning, so
+  // pick the longest match rather than depending on source order, and require the
+  // override to exist separately so a future phone layout cannot silently drop it.
+  const menuRules = html.match(/\.add-menu\s*\{[^}]*\}/g) || [];
+  const baseMenuRule = menuRules.sort((a, b) => b.length - a.length)[0] || "";
+  const touchMenuRule = menuRules.find((r) => /right:\s*12px/.test(r)) || "";
+  check("base menu rule anchors the menu to the viewport, not the flow",
+    /position:\s*fixed/.test(baseMenuRule) && /right:\s*2\.4vmin/.test(baseMenuRule),
+    baseMenuRule.replace(/\s+/g, " ").slice(0, 110) || "(no base rule found)");
+  check("touch layout keeps the menu clear of the phone screen edge",
+    /right:\s*12px/.test(touchMenuRule) && /bottom:\s*calc\(12px \+ 52px/.test(touchMenuRule),
+    touchMenuRule.replace(/\s+/g, " ") || "(no touch override found)");
+  check("base menu rule computes its offset from the button's own height",
+    /bottom:\s*calc\(2\.4vmin \+ max\(52px, 7\.6vmin\)/.test(baseMenuRule),
+    "same max() the FAB uses, so the gap cannot drift");
+  check("menu offset and button offset agree on the inset",
+    /right:\s*2\.4vmin/.test(baseMenuRule) && /\.fab\s*\{[^}]*right:\s*2\.4vmin/.test(html),
+    "both right: 2.4vmin");
+  check("base menu rule is translucent", /background:\s*rgba\(/.test(baseMenuRule));
+
+  // The panel has to genuinely disappear when collapsed, and that was broken once
+  // already: a bare [hidden] guard and a bare .add-menu both have specificity
+  // (0,1,0), so the later `display: flex` won and the border stayed on screen
+  // after close. jsdom does no layout, so `menu.hidden` is true either way and
+  // only the stylesheet can catch this, which is why it is asserted on the CSS.
+  check("a collapsed menu carries a display:none that outranks its own display",
+    /\.add-menu\[hidden\]\s*\{[^}]*display:\s*none/.test(html),
+    "qualified selector is (0,2,0), immune to source order");
+  // Guard against the same bug anywhere else: nothing JS hides may have a
+  // same-specificity display rule that lands after the bare [hidden] guard.
+  {
+    const style = (html.match(/<style>([\s\S]*?)<\/style>/) || ["", ""])[1];
+    const guardAt = style.search(/\[hidden\]\s*\{/);
+    const toggled = [...new Set([
+      ...[...html.matchAll(/getElementById\("([\w-]+)"\)\.hidden\s*=/g)].map((m) => m[1]),
+      ...[...html.matchAll(/querySelector\("\.([\w-]+)"\)\.hidden\s*=/g)].map((m) => m[1]),
+    ])];
+    const broken = [];
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const name of toggled) {
+      const rule = new RegExp("^\\s*\\.?" + esc(name) + "\\s*\\{([^}]*)\\}", "gm");
+      let m;
+      while ((m = rule.exec(style)) !== null) {
+        const disp = /display:\s*([\w-]+)/.exec(m[1]);
+        if (!disp || disp[1] === "none") continue;
+        const rescued = style.includes("." + name + "[hidden]");
+        // A same-specificity display rule only loses to the bare [hidden] guard
+        // if the guard comes later in the stylesheet.
+        if (!rescued && m.index > guardAt) broken.push(`${name}@${m.index}`);
+      }
+    }
+    check("no JS-hidden element is outranked by its own display rule", broken.length === 0,
+      broken.length ? `unrescued: ${broken.join(", ")}` : `checked ${toggled.join(", ")}`);
+  }
+
   // No backdrop exists, so these three stand in for it.
   click(addBtn);
   check("pressing the button again puts the menu away", menu?.hidden === true, `hidden=${menu?.hidden}`);
