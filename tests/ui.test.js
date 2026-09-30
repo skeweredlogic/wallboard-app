@@ -200,12 +200,27 @@ const page = (expr) => window.eval(expr);
               chrome: ["calendar", "tasks", "none"].includes(x.chrome),
               step: typeof x.step === "function",
               render: typeof x.render === "function",
-              add: x.add === null || (x.add && typeof x.add.run === "function"
-                                      && typeof x.add.label === "string")}; })()`);
-    return !(d.label && d.chrome && d.step && d.render && d.add);
+              // A view may opt out of the add control, but the opt-out has to be
+              // an explicit boolean. A view with no fab key at all still gets
+              // the chooser, which is the right default for a new tab.
+              fab: x.fab === undefined || typeof x.fab === "boolean",
+              // The old per-view add:{label,run} entry is gone on purpose:
+              // the button no longer infers event vs task from the tab.
+              noPerViewAdd: x.add === undefined}; })()`);
+    return !(d.label && d.chrome && d.step && d.render && d.fab && d.noPerViewAdd);
   });
   check("every view entry is fully wired", bad.length === 0,
     bad.length ? `incomplete: ${bad.join(", ")}` : `${views.length} views: ${views.join(", ")}`);
+
+  // Every current view keeps the chooser, and the chooser's action list is not
+  // view-dependent, so a future Home tab gets a working + with no new code.
+  const fabless = views.filter((v) => page(`VIEWS[${JSON.stringify(v)}].fab === false`));
+  check("every view offers the add control", fabless.length === 0,
+    fabless.length ? `opted out: ${fabless.join(", ")}` : `${views.length} views`);
+  check("the chooser is the same from every view",
+    page(`Array.isArray(ADD_ACTIONS) && ADD_ACTIONS.length === 2`)
+    && !/view\.add\b|\.add\.run\(/.test(html),
+    "one action list, no per-view branch");
 
   // An unknown view must fall back rather than leaving the wall blank.
   page("state.view = 'nope'; render()");
@@ -320,8 +335,65 @@ const page = (expr) => window.eval(expr);
 
   check("dialog hidden before opening", doc.getElementById("modal").hidden === true);
   click(addBtn);
-  check("add button opens the dialog", doc.getElementById("modal").hidden === false);
-  check("tasks view opens the task dialog", !!doc.getElementById("task-new-title"));
+
+  // --- the chooser the + opens ---------------------------------------------
+  // The button does NOT infer event vs task from the tab. It offers both and lets
+  // the user choose, because the same intent ("put that on the calendar") comes
+  // from every view and a future Home tab has no calendar context to infer from.
+  check("add button opens something", doc.getElementById("modal").hidden === false);
+  check("add button opens a chooser, not a dialog directly",
+    !!doc.getElementById("add-event") && !!doc.getElementById("add-task"),
+    "chooser offers both actions");
+  check("chooser has no task field yet", !doc.getElementById("task-new-title"),
+    "chooser is a menu, the form comes after the pick");
+  check("chooser has no event field yet", !doc.getElementById("ev-title"),
+    "chooser is a menu, the form comes after the pick");
+  check("chooser labels both actions",
+    /new event/i.test(doc.getElementById("add-event")?.textContent || "")
+    && /new task/i.test(doc.getElementById("add-task")?.textContent || ""));
+  check("chooser actions are enabled when both are possible",
+    doc.getElementById("add-event")?.disabled === false
+    && doc.getElementById("add-task")?.disabled === false);
+  check("chooser can be dismissed with the x",
+    !!doc.getElementById("modal-x"), "same overlay as the dialogs");
+  check("chooser focuses its first action", doc.activeElement?.id === "add-event",
+    doc.activeElement?.id || "(none)");
+
+  // An action that cannot run stays visible and says why, instead of silently
+  // disappearing (which reads as "this app cannot make events") or opening a
+  // form that is guaranteed to fail on submit. Flipped here by mutating the
+  // fixture copy in memory only; no request is sent.
+  page("state.data = Object.assign({}, state.data, {can_write: false}); openAddChooser()");
+  check("event action is disabled when the calendar is read-only",
+    doc.getElementById("add-event")?.disabled === true, `disabled=${doc.getElementById("add-event")?.disabled}`);
+  check("disabled event action explains itself",
+    /read-only/i.test(doc.getElementById("add-event")?.textContent || ""),
+    (doc.getElementById("add-event")?.textContent || "").trim().replace(/\s+/g, " "));
+  check("task action stays available when only the calendar is read-only",
+    doc.getElementById("add-task")?.disabled === false);
+  page("state.data = Object.assign({}, state.data, {tasks_status: 'unavailable'}); openAddChooser()");
+  check("task action is disabled when tasks are not syncing",
+    doc.getElementById("add-task")?.disabled === true);
+  check("disabled task action explains itself",
+    /not syncing/i.test(doc.getElementById("add-task")?.textContent || ""));
+  page("state.data.can_write = " + JSON.stringify(!!payload.can_write)
+    + "; state.data.tasks_status = " + JSON.stringify(payload.tasks_status)
+    + "; openAddChooser()");
+  check("chooser re-enables once the cause clears",
+    doc.getElementById("add-event")?.disabled === false
+    && doc.getElementById("add-task")?.disabled === false);
+
+  // The chooser is view-independent: the same two options from a calendar tab.
+  click(doc.getElementById("modal-x"));
+  check("chooser x closes it", doc.getElementById("modal").hidden === true);
+
+  click(addBtn);
+  check("chooser offers the same actions on a calendar view",
+    !!doc.getElementById("add-event") && !!doc.getElementById("add-task"), "identical list");
+
+  // Picking the task opens the task form.
+  click(doc.getElementById("add-task"));
+  check("choosing a task opens the task dialog", !!doc.getElementById("task-new-title"));
   check("dialog has a title field", !!doc.getElementById("task-new-title"));
   check("dialog has a confirm control", !!doc.getElementById("task-confirm"));
   check("dialog has a cancel control", !!doc.getElementById("task-cancel"));
@@ -340,6 +412,44 @@ const page = (expr) => window.eval(expr);
   check("list still rendered after the dialog", taskRows() === (payload.tasks || []).length,
     `${taskRows()} rows`);
 
+  // --- no zoom on focus ----------------------------------------------------
+  // iOS Safari zooms the whole viewport when it focuses a text field whose
+  // computed font-size is under 16px. Everything here is sized in vmin for a
+  // wall panel, which on a phone is ~9px, so opening a dialog used to yank the
+  // page into a magnified scrolling mess. The fix is a 16px floor on the form
+  // controls. These assertions exist because the tempting one-line "fix" is to
+  // set maximum-scale=1, which blocks pinch-zoom for everyone and is worse.
+  const viewport = (html.match(/<meta name="viewport"[^>]*>/i) || ["(none)"])[0];
+  check("viewport does not lock pinch-zoom",
+    !/maximum-scale|user-scalable\s*=\s*no/i.test(viewport), viewport);
+  check("viewport is still device-width", /width\s*=\s*device-width/.test(viewport), viewport);
+  // Every control that can take focus and accept text needs the floor. A bare
+  // vmin size here is the bug, so assert max(16px, ...) is present.
+  for (const [what, sel] of [
+    ["task textarea", /\.task-form textarea\s*\{[^}]*font-size:\s*max\(\s*16px/],
+    ["text/date/time inputs", /\.task-form input\[type="(text|date|time)"\][\s\S]*?font-size:\s*max\(\s*16px/],
+    ["calendar select", /\.modal-card select\s*\{[^}]*font-size:\s*max\(\s*16px/],
+  ]) {
+    check(`focusable field has a 16px floor: ${what}`, sel.test(html),
+      "iOS zooms on focus below 16px");
+  }
+  // The vmin-based field sizes must not survive anywhere as a bare value.
+  const bareFieldSize = /\.task-form (?:textarea|input)[^{]*\{[^}]*font-size:\s*\d*\.?\d+vmin/.test(html);
+  check("no form field is sized below 16px in bare vmin", !bareFieldSize,
+    "vmin alone collapses to ~9px on a phone");
+  check("date and time fields share the text field rule",
+    /input\[type="date"\][^\n]*,\s*\n\s*\.task-form input\[type="time"\]/.test(html),
+    "one rule covers all three text-entry types");
+  check("field labels stay legible on a phone", /\.ro\s*\{[^}]*font-size:\s*max\(/.test(html));
+  check("form buttons have a finger-sized height",
+    /\.task-form-actions button\s*\{[^}]*min-height:\s*\d{2,}px/.test(html));
+  check("chooser rows have a finger-sized height",
+    /\.chooser-item\s*\{[^}]*min-height:\s*max\(\s*\d{2,}px/.test(html));
+  check("chooser labels are legible on a phone",
+    /\.ci-label\s*\{[^}]*font-size:\s*max\(\s*1[6-9]px/.test(html));
+  check("text inflation is pinned so landscape does not drift",
+    /-webkit-text-size-adjust:\s*100%/.test(html));
+
   // Chrome that does not apply to a task list must be hidden.
   check("calendar filters hidden on tasks view", doc.getElementById("filters").hidden === true);
   check("date stepper hidden on tasks view", doc.querySelector(".nav").hidden === true);
@@ -351,8 +461,7 @@ const page = (expr) => window.eval(expr);
   // Same discipline as the task dialog: never confirm with a real title, since
   // this suite also runs against the live server and an event lands on the real
   // family calendar. Assert structure, validation and dismissal only.
-  // Still parked on the tasks view here; switch to a calendar view and check the
-  // same control relabels and retargets.
+  // The event form is reached through the chooser, not from a calendar tab.
   check("add button is still one control on the tasks view",
     doc.getElementById("add-btn") === addBtn, "same element across views");
 
@@ -369,9 +478,10 @@ const page = (expr) => window.eval(expr);
     (addBtn?.textContent || "").length <= 1, JSON.stringify(addBtn?.textContent || ""));
 
   click(addBtn);
-  check("add button opens the event dialog", doc.getElementById("modal").hidden === false);
-  check("calendar view opens the event dialog, not the task one",
-    !!doc.getElementById("ev-title") && !doc.getElementById("task-new-title"));
+  click(doc.getElementById("add-event"));
+  check("choosing an event opens the event dialog", !!doc.getElementById("ev-title"));
+  check("chooser no longer visible once a form is open",
+    !doc.getElementById("add-event"), "chooser is replaced, not stacked");
   check("dialog heading says event", /new event/i.test(doc.querySelector("#modal-card h2")?.textContent || ""));
   for (const id of ["ev-title", "ev-date", "ev-start", "ev-end", "ev-cal", "ev-desc",
                     "ev-confirm", "ev-cancel", "ev-allday"]) {

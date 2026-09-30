@@ -2,9 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- No maximum-scale and no user-scalable=no, on purpose. iOS zooms when it
+     focuses a sub-16px text field, and the fix is the 16px font floor on the
+     form controls, not locking the user's pinch-zoom. -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wallboard</title>
 <style>
+  /* Stop Safari inflating the vmin-based type in landscape, which otherwise
+     makes the wall layout drift between orientations. */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   :root {
     --bg: #0b0e14;
     --panel: #121722;
@@ -71,13 +77,14 @@
   /* ---------- modal move control ---------- */
   .modal-card select {
     background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
-    font: inherit; font-size: 2.1vmin; padding: 0.7vmin 1.2vmin; border-radius: 0.7vmin;
+    /* 16px floor for the same iOS focus-zoom reason as the text fields. */
+    font: inherit; font-size: max(16px, 2.1vmin); padding: max(8px, 0.7vmin) 1.2vmin; border-radius: 0.7vmin;
     width: 100%; cursor: pointer;
   }
   .move-msg { font-size: 1.9vmin; margin-top: 1vmin; }
   .move-msg.err { color: #ff8b8b; }
   .move-msg.ok { color: #7ee0a1; }
-  .ro { color: var(--muted); font-size: 1.8vmin; }
+  .ro { color: var(--muted); font-size: max(12px, 1.8vmin); }
 
   main { flex: 1; overflow: hidden; margin-top: 1.4vmin; display: flex; }
 
@@ -319,15 +326,23 @@
      view; only its label and its target change. */
   .task-form { display: flex; flex-direction: column; gap: 1.2vmin; margin-top: 2.4vmin; }
   .task-form textarea {
-    font: inherit; font-size: 2.3vmin; padding: 1.2vmin 1.4vmin; line-height: 1.35;
+    /* 16px floor is not cosmetic: iOS Safari zooms the whole viewport when it
+       focuses a text field whose computed font-size is under 16px. At 2.3vmin
+       this is ~9px on a phone, so opening a dialog used to yank the page into
+       a magnified, scrolling mess. max() clamps the small end while still
+       scaling up on a wall panel. Do NOT "fix" this with maximum-scale=1 or
+       user-scalable=no in the viewport meta; that blocks pinch-zoom for
+       everyone, which is worse than the problem. */
+    font: inherit; font-size: max(16px, 2.3vmin); padding: 1.2vmin 1.4vmin; line-height: 1.35;
     border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
     background: var(--panel-2); color: var(--fg); outline: none;
-    resize: vertical; min-height: 8vmin; width: 100%;
+    resize: vertical; min-height: max(88px, 8vmin); width: 100%;
   }
   .task-form textarea:focus { border-color: var(--accent); }
   .task-form-actions { display: flex; justify-content: flex-end; gap: 1vmin; }
   .task-form-actions button {
-    font: inherit; font-size: 1.9vmin; padding: 0.8vmin 2vmin;
+    font: inherit; font-size: max(15px, 1.9vmin); padding: max(9px, 0.8vmin) max(14px, 2vmin);
+    min-height: 40px;
     border-radius: 0.7vmin; cursor: pointer; border: 0.15vmin solid var(--border);
     background: var(--panel-2); color: var(--fg);
   }
@@ -359,10 +374,36 @@
   /* main is a flex row holding a scrolling child, so bottom padding here keeps
      the last row from parking permanently underneath the floating button. */
   main { padding-bottom: 11vmin; }
+
+  /* The chooser the + opens. Two full-width rows rather than a compact list:
+     this is pressed with a thumb on a wall tablet, so each target is finger
+     sized and the label is large enough to read from standing distance. */
+  .chooser { display: flex; flex-direction: column; gap: 1vmin; margin-top: 1.4vmin; }
+  .chooser-item {
+    display: flex; align-items: center; gap: 1.4vmin; width: 100%;
+    min-height: max(52px, 6vmin); padding: max(10px, 1.1vmin) max(14px, 1.4vmin);
+    border-radius: max(10px, 1vmin); cursor: pointer; text-align: left;
+    border: 0.15vmin solid var(--border); background: var(--panel-2); color: var(--fg);
+    font: inherit;
+  }
+  .chooser-item:hover:not(:disabled) { border-color: var(--accent); }
+  .chooser-item:focus-visible { outline: 0.3vmin solid var(--accent); outline-offset: 0.2vmin; }
+  .chooser-item:disabled { opacity: 0.45; cursor: default; }
+  .ci-glyph {
+    display: flex; align-items: center; justify-content: center; flex: none;
+    width: max(34px, 4vmin); height: max(34px, 4vmin); border-radius: 50%;
+    background: var(--accent); color: #061021; font-size: max(17px, 2.2vmin);
+  }
+  .chooser-item:disabled .ci-glyph { background: var(--muted); }
+  .ci-text { display: flex; flex-direction: column; gap: 0.3vmin; min-width: 0; }
+  .ci-label { font-size: max(17px, 2.3vmin); }
+  .ci-why { font-size: max(12px, 1.6vmin); color: var(--muted); }
   .task-form input[type="text"],
   .task-form input[type="date"],
   .task-form input[type="time"] {
-    font: inherit; font-size: 2.3vmin; padding: 1vmin 1.2vmin;
+    /* Same 16px floor as the textarea: iOS zooms on focus for any of these. */
+    font: inherit; font-size: max(16px, 2.3vmin); padding: max(8px, 1vmin) 1.2vmin;
+    min-height: max(40px, 3.4vmin);
     border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
     background: var(--panel-2); color: var(--fg); outline: none; width: 100%;
   }
@@ -372,7 +413,8 @@
   .field-col { display: flex; flex-direction: column; gap: 0.6vmin; }
   .check-row {
     display: flex; align-items: center; gap: 0.9vmin;
-    font-size: 2.1vmin; color: var(--fg); cursor: pointer;
+    font-size: max(14px, 2.1vmin); color: var(--fg); cursor: pointer;
+    min-height: 36px;
   }
   .check-row input { width: 2.2vmin; height: 2.2vmin; accent-color: var(--accent); flex-shrink: 0; }
   .task-check {
@@ -409,7 +451,7 @@
        contents, so a longer word ("Create event" vs "Create task") shifted the
        button sideways. The button is now a direct fixed-position child of the
        page with an explicit size, so nothing about the current view can move it. -->
-  <button class="fab" id="add-btn" type="button" aria-label="Create an event">+</button>
+  <button class="fab" id="add-btn" type="button" aria-haspopup="dialog" aria-label="Add an event or task">+</button>
 
   <div class="modal" id="modal" hidden>
     <div class="modal-backdrop" id="modal-backdrop"></div>
@@ -1157,26 +1199,22 @@ function _wireChecks() {
    ========================================================================= */
 const VIEWS = {
   agenda: {
-    label: "Agenda", chrome: "calendar",
-    add: { label: "Create event", run: openEventCreate },
+    label: "Agenda", chrome: "calendar", fab: true,
     step: (dir) => { state.cursor = addDaysKey(state.cursor, dir); },
     render: renderAgenda,
   },
   week: {
-    label: "Week", chrome: "calendar",
-    add: { label: "Create event", run: openEventCreate },
+    label: "Week", chrome: "calendar", fab: true,
     step: (dir) => { state.cursor = addDaysKey(state.cursor, dir * 7); },
     render: renderWeek,
   },
   month: {
-    label: "Month", chrome: "calendar",
-    add: { label: "Create event", run: openEventCreate },
+    label: "Month", chrome: "calendar", fab: true,
     step: (dir) => { state.cursor = addMonthsKey(state.cursor, dir); },
     render: renderMonth,
   },
   tasks: {
-    label: "Tasks", chrome: "tasks",
-    add: { label: "Create task", run: openTaskCreate },
+    label: "Tasks", chrome: "tasks", fab: true,
     step: () => {},
     render: renderTasks,
   },
@@ -1197,18 +1235,65 @@ function currentView() {
   return VIEWS[state.view] || VIEWS.agenda;
 }
 
+/* What the floating + offers, and it is deliberately NOT tied to the current
+   view. Guessing "you are on Tasks so you must mean a task" is wrong the moment
+   a second tab exists: the same thought ("put that on the calendar") arrives from
+   every view, and a future Home tab has no calendar context to guess from at
+   all. So the button always offers the same short list and the user picks.
+   `blocked` returns why an action cannot run, so the entry stays visible and
+   honest instead of silently vanishing. */
+const ADD_ACTIONS = [
+  {
+    id: "event", label: "New event", glyph: "\u25A7", run: openEventCreate,
+    blocked: () => {
+      if (!state.data || !state.data.can_write) return "Calendar is read-only";
+      if (!writableCalendars().length) return "No writable calendar";
+      return "";
+    },
+  },
+  {
+    id: "task", label: "New task", glyph: "\u2713", run: openTaskCreate,
+    blocked: () => {
+      if (state.data && state.data.tasks_status === "unavailable") return "Tasks are not syncing";
+      return "";
+    },
+  },
+];
+
+/* The chooser shares #modal with the two dialogs, so the backdrop click and
+   Escape that already close a dialog close this too, and there is one overlay
+   on the page instead of two that can stack. */
+function openAddChooser() {
+  const card = document.getElementById("modal-card");
+  card.innerHTML = `
+    <button class="modal-x" id="modal-x" aria-label="Close">&times;</button>
+    <h2>Add to the wall</h2>
+    <div class="chooser">${ADD_ACTIONS.map((a) => {
+      const why = a.blocked();
+      return `<button type="button" class="chooser-item" id="add-${a.id}"${why ? " disabled" : ""}>
+        <span class="ci-glyph" aria-hidden="true">${a.glyph}</span>
+        <span class="ci-text">
+          <span class="ci-label">${esc(a.label)}</span>
+          ${why ? `<span class="ci-why">${esc(why)}</span>` : ""}
+        </span>
+      </button>`;
+    }).join("")}</div>`;
+  document.getElementById("modal").hidden = false;
+  document.getElementById("modal-x").onclick = closeModal;
+  for (const a of ADD_ACTIONS) {
+    const el = document.getElementById("add-" + a.id);
+    if (el && !el.disabled) el.onclick = () => a.run();
+  }
+  const first = card.querySelector(".chooser-item:not(:disabled)") || card.querySelector(".chooser-item");
+  if (first) first.focus();
+}
+
 /* The one add control. Its geometry is fixed by the stylesheet and its only
-   text is the "+" glyph, so no view can move or resize it. The wording that
-   used to be visible lives in aria-label/title, which costs no layout. */
+   text is the "+" glyph, so no view can move or resize it. The registry decides
+   only whether the control is shown at all. */
 function syncAddButton(view) {
   const btn = document.getElementById("add-btn");
-  if (!view.add) {
-    btn.hidden = true;
-    return;
-  }
-  btn.hidden = false;
-  btn.setAttribute("aria-label", view.add.label);
-  btn.title = view.add.label;
+  btn.hidden = view.fab === false;
 }
 
 function step(dir) {
@@ -1312,12 +1397,10 @@ document.getElementById("filters").addEventListener("click", e => {
 document.getElementById("prev").onclick = () => { step(-1); render(); };
 document.getElementById("next").onclick = () => { step(1); render(); };
 document.getElementById("today").onclick = () => { state.cursor = todayKey(); render(); };
-// Ask the registry what the current view wants the add button to do, rather
-// than testing state.view here, so a new tab cannot be forgotten.
-document.getElementById("add-btn").onclick = () => {
-  const add = currentView().add;
-  if (add) add.run();
-};
+// The add control always offers the same chooser, so nothing here depends on
+// which tab is showing. That also means a view can opt out with `fab: false`
+// and a new tab gets a working + for free.
+document.getElementById("add-btn").onclick = openAddChooser;
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeModal();
   else if (e.key === "ArrowLeft") { step(-1); render(); }
