@@ -190,7 +190,11 @@ async function loadPayload() {
   check("Tasks tab exists", !!tab("tasks"));
 
   click(tab("tasks"));
-  check("tasks view rendered rows", taskRows() > 0, `${taskRows()} rows`);
+  // Compare against the payload rather than "> 0". A live list is legitimately
+  // empty, and an assertion that only passes when tasks exist is a test that
+  // cannot tell "renders correctly" apart from "has data".
+  check("tasks view rendered rows", taskRows() === (payload.tasks || []).length,
+    `${taskRows()} rows / ${(payload.tasks || []).length} in payload`);
   check("tasks rows are not calendar event blocks",
     doc.querySelectorAll("#main [data-id]").length === 0,
     "no [data-id] elements in the tasks view");
