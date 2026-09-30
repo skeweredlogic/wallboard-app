@@ -30,7 +30,7 @@ INDEX_PATH = os.environ.get("INDEX_PATH", "/app/index.html")
 # Stamped into /api/state so an already-open wallboard can detect a new build
 # and reload itself. A long-running display tab otherwise keeps running the
 # JavaScript it was loaded with, and new UI features look like they're missing.
-APP_VERSION = "0.5.3"
+APP_VERSION = "0.5.4"
 
 CALENDAR_IDS = [c.strip() for c in CALENDAR_IDS_RAW.split(",") if c.strip()]
 CALENDAR_COLORS = json.loads(CALENDAR_COLORS_RAW)
@@ -500,6 +500,120 @@ async def move_event(payload: MovePayload):
     # Refresh in the background so the UI reflects the change promptly.
     threading.Thread(target=sync, daemon=True).start()
     return {"status": "ok"}
+
+
+# --- Google Calendar create ---------------------------------------------------
+# Creates a real event on a real shared calendar, so this is the endpoint where a
+# bug is visible to the whole household rather than just to this display. Every
+# input is validated here rather than trusted from the form.
+class CreateEventPayload(BaseModel):
+    title: str
+    date: str                                   # YYYY-MM-DD, wall-local
+    start_time: Optional[str] = None            # HH:MM, wall-local
+    end_time: Optional[str] = None              # HH:MM, wall-local
+    all_day: bool = False
+    description: Optional[str] = None
+    calendar_id: Optional[str] = None
+
+
+def _hhmm(value, field):
+    """Validate an HH:MM string and return it zero-padded, or raise 400."""
+    if value is None or not str(value).strip():
+        raise HTTPException(status_code=400, detail=f"{field} is required.")
+    v = str(value).strip()
+    try:
+        hh, mm = v.split(":")
+        hh, mm = int(hh), int(mm)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{field} must look like 14:30.")
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        raise HTTPException(status_code=400, detail=f"{field} must be a real time of day.")
+    return f"{hh:02d}:{mm:02d}"
+
+
+@app.post("/api/events")
+async def create_event(payload: CreateEventPayload):
+    """Create an event on a displayed, writable calendar.
+
+    The wall becomes a capture surface for the calendar, not just a viewer.
+    """
+    with _lock:
+        can_write = state["can_write"]
+        allowed = set(state["calendars"].keys())
+        writable = {c["id"] for c in state["calendar_list"] if c.get("writable")}
+
+    if not can_write:
+        raise HTTPException(
+            status_code=403,
+            detail="Calendar write access not granted. Re-authorize the wallboard "
+                   "token with a write calendar scope to enable creating events.",
+        )
+
+    title = (payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Give the event a title.")
+    if len(title) > 300:
+        title = title[:300]
+
+    try:
+        datetime.strptime(payload.date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="date must look like 2026-09-30.")
+    date = payload.date
+
+    if payload.all_day:
+        start = {"date": date}
+        end = {"date": date}
+    else:
+        start_t = _hhmm(payload.start_time, "start_time")
+        # Default to an hour, the least surprising duration for a capture surface.
+        end_t = _hhmm(payload.end_time, "end_time") if payload.end_time else None
+        if end_t is None:
+            eh, em = int(start_t[:2]), int(start_t[3:])
+            total = eh * 60 + em + 60
+            end_t = f"{total // 60:02d}:{total % 60:02d}"
+        if end_t <= start_t:
+            raise HTTPException(
+                status_code=400,
+                detail="end_time must be after start_time.",
+            )
+        # Send a naive local dateTime plus timeZone and let Google anchor it, so
+        # we never have to reason about UTC offsets or DST transitions here.
+        start = {"dateTime": f"{date}T{start_t}:00", "timeZone": TIMEZONE}
+        end = {"dateTime": f"{date}T{end_t}:00", "timeZone": TIMEZONE}
+
+    # Default to the first writable calendar rather than assuming a fixed one.
+    if not writable:
+        raise HTTPException(status_code=400, detail="No writable calendar is available.")
+    cal_id = payload.calendar_id or sorted(writable)[0]
+    if cal_id not in allowed:
+        raise HTTPException(status_code=400, detail="Calendar is not displayed/known to this app.")
+    if cal_id not in writable:
+        raise HTTPException(status_code=403, detail="That calendar is read-only.")
+
+    body = {"summary": title, "start": start, "end": end}
+    desc = (payload.description or "").strip()
+    if desc:
+        body["description"] = desc[:1000]
+
+    try:
+        service = get_calendar_service()
+        created = service.events().insert(calendarId=cal_id, body=body).execute()
+    except HttpError as e:
+        # Same pass-through as /move: surface Google's real status so the UI can
+        # explain the failure instead of claiming a generic gateway error.
+        code = getattr(getattr(e, "resp", None), "status", 502)
+        status = code if code in (400, 403, 404, 409) else 502
+        logger.error("create failed on %s (google %s): %s", cal_id, code, e)
+        raise HTTPException(status_code=status, detail=f"Could not create event: {e}")
+    except Exception as e:
+        logger.error("create failed on %s: %s", cal_id, e)
+        raise HTTPException(status_code=502, detail=f"Could not create event: {e}")
+
+    logger.info("created event %s on %s (%s)", created.get("id"), cal_id, title)
+    threading.Thread(target=sync, daemon=True).start()
+    return {"status": "ok", "event": {"id": created.get("id"), "summary": title,
+                                      "calendar_id": cal_id}}
 
 
 # --- Google Tasks write endpoints ------------------------------------------

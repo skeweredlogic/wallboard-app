@@ -340,6 +340,32 @@
   .task-form-actions .task-confirm { background: var(--accent); color: #061021; border-color: var(--accent); font-weight: 600; }
   .task-form-msg { font-size: 1.9vmin; min-height: 2.2vmin; }
   .task-form-msg.err { color: #ff8b8b; }
+  /* The calendar-side Add control. One per view: the Tasks view keeps its own
+     button in the list header, so the toolbar one is hidden there rather than
+     putting two controls for the same action side by side. */
+  .add-global {
+    font: inherit; font-size: 1.9vmin; padding: 0.7vmin 1.8vmin;
+    border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
+    cursor: pointer; margin-left: auto;
+    background: var(--panel); color: var(--accent); white-space: nowrap;
+  }
+  .add-global:hover { background: var(--panel-2); border-color: var(--accent); }
+  .task-form input[type="text"],
+  .task-form input[type="date"],
+  .task-form input[type="time"] {
+    font: inherit; font-size: 2.3vmin; padding: 1vmin 1.2vmin;
+    border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
+    background: var(--panel-2); color: var(--fg); outline: none; width: 100%;
+  }
+  .task-form input:focus { border-color: var(--accent); }
+  .field-row { display: flex; gap: 1.2vmin; }
+  .field-row > * { flex: 1; min-width: 0; }
+  .field-col { display: flex; flex-direction: column; gap: 0.6vmin; }
+  .check-row {
+    display: flex; align-items: center; gap: 0.9vmin;
+    font-size: 2.1vmin; color: var(--fg); cursor: pointer;
+  }
+  .check-row input { width: 2.2vmin; height: 2.2vmin; accent-color: var(--accent); flex-shrink: 0; }
   .task-check {
     width: 2.2vmin; height: 2.2vmin; border-radius: 0.5vmin;
     border: 0.25vmin solid var(--muted); display: inline-block;
@@ -367,6 +393,7 @@
       <button id="next" title="Next">&rsaquo;</button>
       <button class="today" id="today">Today</button>
     </div>
+    <button class="add-global" id="add-event-btn" type="button">+ New event</button>
   </div>
 
   <div class="filters" id="filters"></div>
@@ -904,6 +931,176 @@ function openTaskCreate() {
   };
 }
 
+/* Create-event dialog, the calendar-side twin of openTaskCreate. Shares #modal,
+   so Escape and the backdrop already work. Unlike a task, an event lands on a
+   real shared calendar that the rest of the household reads, so the calendar and
+   the times are explicit rather than inferred. */
+function writableCalendars() {
+  const cals = (state.data && state.data.calendar_list) || [];
+  return cals.filter((c) => c.writable);
+}
+
+/* Default a new event to the next half hour on the day being looked at, which
+   for Agenda/Week/Month is whatever date the view is parked on. */
+function _defaultStartTime() {
+  const now = new Date();
+  const mins = now.getHours() * 60 + now.getMinutes();
+  const next = Math.ceil(mins / 30) * 30;
+  const h = Math.floor(next / 60), m = next % 60;
+  return [String(h).padStart(2, "0"), String(m).padStart(2, "0")];
+}
+
+function openEventCreate() {
+  const cals = writableCalendars();
+  const canWrite = !!(state.data && state.data.can_write);
+
+  if (!canWrite || !cals.length) {
+    document.getElementById("modal-card").innerHTML = `
+      <button class="modal-x" id="modal-x">&times;</button>
+      <h2>New event</h2>
+      <p class="tasks-note">${canWrite
+        ? "None of the displayed calendars are writable from the wallboard."
+        : "Calendar write access is not granted to the wallboard token."}</p>`;
+    document.getElementById("modal").hidden = false;
+    document.getElementById("modal-x").onclick = () => closeModal();
+    document.getElementById("modal-backdrop").onclick = () => closeModal();
+    return;
+  }
+
+  const [sh, sm] = _defaultStartTime();
+  const endMins = (parseInt(sh, 10) * 60 + parseInt(sm, 10) + 60);
+  const eh = String(Math.floor(endMins / 60) % 24).padStart(2, "0");
+  const em = String(endMins % 60).padStart(2, "0");
+
+  document.getElementById("modal-card").innerHTML = `
+    <button class="modal-x" id="modal-x">&times;</button>
+    <h2>New event</h2>
+    <div class="task-form">
+      <label class="ro" for="ev-title">Title</label>
+      <input type="text" id="ev-title" maxlength="300" placeholder="e.g. Dentist">
+      <div class="field-row">
+        <div class="field-col">
+          <label class="ro" for="ev-date">Date</label>
+          <input type="date" id="ev-date" value="${state.cursor}">
+        </div>
+        <div class="field-col">
+          <label class="ro" for="ev-cal">Calendar</label>
+          <select id="ev-cal">${cals.map((c) =>
+            `<option value="${esc(c.id)}">${esc(c.summary)}</option>`).join("")}</select>
+        </div>
+      </div>
+      <label class="check-row"><input type="checkbox" id="ev-allday"> All day</label>
+      <div class="field-row" id="ev-time-row">
+        <div class="field-col">
+          <label class="ro" for="ev-start">Starts</label>
+          <input type="time" id="ev-start" value="${sh}:${sm}">
+        </div>
+        <div class="field-col">
+          <label class="ro" for="ev-end">Ends</label>
+          <input type="time" id="ev-end" value="${eh}:${em}">
+        </div>
+      </div>
+      <label class="ro" for="ev-desc">Notes <span class="field-hint">(optional)</span></label>
+      <textarea id="ev-desc" maxlength="1000" rows="2" placeholder="Anything to remember"></textarea>
+      <div class="task-form-msg" id="ev-msg"></div>
+      <div class="task-form-actions">
+        <button id="ev-cancel" type="button">Cancel</button>
+        <button class="task-confirm" id="ev-confirm" type="button">Create event</button>
+      </div>
+    </div>`;
+
+  const modal = document.getElementById("modal");
+  modal.hidden = false;
+
+  const title = document.getElementById("ev-title");
+  const date = document.getElementById("ev-date");
+  const allday = document.getElementById("ev-allday");
+  const start = document.getElementById("ev-start");
+  const end = document.getElementById("ev-end");
+  const timeRow = document.getElementById("ev-time-row");
+  const msg = document.getElementById("ev-msg");
+  const confirm = document.getElementById("ev-confirm");
+  title.focus();
+
+  // All-day events have no times, so hide the row rather than showing inputs
+  // that would be ignored by the API.
+  const syncAllday = () => { timeRow.hidden = allday.checked; };
+  allday.onchange = syncAllday;
+  syncAllday();
+
+  const close = () => closeModal();
+  document.getElementById("modal-x").onclick = close;
+  document.getElementById("modal-backdrop").onclick = close;
+  document.getElementById("ev-cancel").onclick = close;
+
+  const submit = async () => {
+    const t = title.value.trim();
+    if (!t) {
+      msg.className = "task-form-msg err";
+      msg.textContent = "Give the event a title first.";
+      title.focus();
+      return;
+    }
+    if (!date.value) {
+      msg.className = "task-form-msg err";
+      msg.textContent = "Pick a date.";
+      date.focus();
+      return;
+    }
+    if (!allday.checked && start.value && end.value && end.value <= start.value) {
+      msg.className = "task-form-msg err";
+      msg.textContent = "The end time has to be after the start.";
+      end.focus();
+      return;
+    }
+    const body = {
+      title: t,
+      date: date.value,
+      all_day: allday.checked,
+      calendar_id: document.getElementById("ev-cal").value,
+    };
+    if (!allday.checked) {
+      body.start_time = start.value;
+      body.end_time = end.value;
+    }
+    const desc = document.getElementById("ev-desc").value.trim();
+    if (desc) body.description = desc;
+
+    confirm.disabled = true;
+    msg.className = "task-form-msg";
+    msg.textContent = "Creating…";
+    try {
+      const res = await fetch("/api/events", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        let d = String(res.status);
+        try { d = (await res.json()).detail || d; } catch (e) {}
+        throw new Error(d);
+      }
+      closeModal();
+      await poll();
+    } catch (e) {
+      confirm.disabled = false;
+      msg.className = "task-form-msg err";
+      msg.textContent = "✕ " + e.message;
+    }
+  };
+
+  confirm.onclick = submit;
+  // Enter from a single-line field submits; in the notes box it is a newline.
+  const enterSubmits = (el) => {
+    el.onkeydown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+    };
+  };
+  enterSubmits(title);
+  enterSubmits(start);
+  enterSubmits(end);
+}
+
 function _wireChecks() {
   document.querySelectorAll(".task-check").forEach((cb) => {
     cb.onclick = async (e) => {
@@ -943,6 +1140,9 @@ function render() {
   const isTasks = state.view === "tasks";
   document.getElementById("filters").hidden = isTasks;
   document.querySelector(".nav").hidden = isTasks;
+  // One add control per view: the Tasks view has its own button in the list
+  // header, so the toolbar one only appears on the calendar views.
+  document.getElementById("add-event-btn").hidden = isTasks;
   if (!isTasks) renderFilters();
   if (state.view === "agenda") renderAgenda();
   else if (state.view === "week") renderWeek();
@@ -1033,6 +1233,7 @@ document.getElementById("filters").addEventListener("click", e => {
 document.getElementById("prev").onclick = () => { step(-1); render(); };
 document.getElementById("next").onclick = () => { step(1); render(); };
 document.getElementById("today").onclick = () => { state.cursor = todayKey(); render(); };
+document.getElementById("add-event-btn").onclick = openEventCreate;
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeModal();
   else if (e.key === "ArrowLeft") { step(-1); render(); }

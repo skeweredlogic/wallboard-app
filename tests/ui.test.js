@@ -51,6 +51,10 @@ async function loadPayload() {
   await new Promise((r) => setTimeout(r, 500));
   const doc = window.document;
   const click = (el) => el.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+// `state` is a top-level const in the page script, so it is not a window
+// property and cannot be read from here directly. Evaluating in the page's own
+// global scope reaches the real binding rather than a guess at what it holds.
+const page = (expr) => window.eval(expr);
   const blocks = () => doc.querySelectorAll("#main [data-id]").length;
   const tab = (v) => doc.querySelector(`.tab[data-view="${v}"]`);
   const next = () => click(doc.getElementById("next"));
@@ -289,6 +293,79 @@ async function loadPayload() {
   check("filters restored on calendar view", (click(tab("agenda"), doc.getElementById("filters").hidden === false),
     doc.getElementById("filters").hidden === false));
   check("stepper restored on calendar view", doc.querySelector(".nav").hidden === false);
+
+  // --- create-event dialog --------------------------------------------------
+  // Same discipline as the task dialog: never confirm with a real title, since
+  // this suite also runs against the live server and an event lands on the real
+  // family calendar. Assert structure, validation and dismissal only.
+  const addEv = doc.getElementById("add-event-btn");
+  check("calendar add button present", !!addEv, addEv?.textContent || "(missing)");
+  check("calendar add button is labelled", /\+\s*new event/i.test(addEv?.textContent || ""));
+  // Assert this while actually parked on the tasks view.
+  click(tab("tasks"));
+  check("calendar add button hidden on tasks view", addEv?.hidden === true,
+    `hidden=${addEv?.hidden}`);
+  click(tab("agenda"));
+  check("calendar add button shown on agenda view", addEv?.hidden === false,
+    `hidden=${addEv?.hidden}`);
+
+  click(addEv);
+  check("add button opens the event dialog", doc.getElementById("modal").hidden === false);
+  check("dialog heading says event", /new event/i.test(doc.querySelector("#modal-card h2")?.textContent || ""));
+  for (const id of ["ev-title", "ev-date", "ev-start", "ev-end", "ev-cal", "ev-desc",
+                    "ev-confirm", "ev-cancel", "ev-allday"]) {
+    check(`event dialog has ${id}`, !!doc.getElementById(id));
+  }
+  check("event title field takes focus", doc.activeElement?.id === "ev-title",
+    doc.activeElement?.id || "(none)");
+  check("event date defaults to the viewed day",
+    doc.getElementById("ev-date")?.value === page("state.cursor"),
+    `${doc.getElementById("ev-date")?.value} vs ${page("state.cursor")}`);
+  check("event defaults to a timed hour",
+    /^\d{2}:\d{2}$/.test(doc.getElementById("ev-start")?.value || "") &&
+    /^\d{2}:\d{2}$/.test(doc.getElementById("ev-end")?.value || ""),
+    `${doc.getElementById("ev-start")?.value} -> ${doc.getElementById("ev-end")?.value}`);
+
+  // The calendar picker must only ever offer writable calendars: offering a
+  // read-only one would let the dialog build a request the API rejects.
+  const offered = [...doc.querySelectorAll("#ev-cal option")].map((o) => o.value);
+  const writableIds = (payload.calendar_list || []).filter((c) => c.writable).map((c) => c.id);
+  check("calendar picker offers only writable calendars",
+    offered.length > 0 && offered.every((id) => writableIds.includes(id)),
+    `${offered.length} offered`);
+
+  // Ticking all-day must hide the times rather than send values the API drops.
+  check("times visible by default", doc.getElementById("ev-time-row").hidden === false);
+  const cb = doc.getElementById("ev-allday");
+  cb.checked = true; cb.onchange();
+  check("all-day hides the time row", doc.getElementById("ev-time-row").hidden === true);
+  cb.checked = false; cb.onchange();
+  check("unticking all-day restores the time row", doc.getElementById("ev-time-row").hidden === false);
+
+  // Submitting nothing must refuse without reaching the API.
+  click(doc.getElementById("ev-confirm"));
+  await new Promise((r) => setTimeout(r, 50));
+  check("empty event submit is refused", /title first/i.test(doc.getElementById("ev-msg")?.textContent || ""),
+    doc.getElementById("ev-msg")?.textContent || "(no message)");
+  check("refused event submit keeps the dialog open", doc.getElementById("modal").hidden === false);
+
+  // An end before the start is a typo, not a request worth sending.
+  doc.getElementById("ev-title").value = "ZZ never sent";
+  doc.getElementById("ev-start").value = "15:00";
+  doc.getElementById("ev-end").value = "14:00";
+  click(doc.getElementById("ev-confirm"));
+  await new Promise((r) => setTimeout(r, 50));
+  check("end-before-start is refused", /after the start/i.test(doc.getElementById("ev-msg")?.textContent || ""),
+    doc.getElementById("ev-msg")?.textContent || "(no message)");
+
+  click(doc.getElementById("ev-cancel"));
+  check("event cancel closes the dialog", doc.getElementById("modal").hidden === true);
+  // Whatever the view was rendering must survive the dialog closing. A day with
+  // no events renders an .empty placeholder rather than .agenda, so assert on
+  // #main having content instead of a specific view class.
+  check("view still rendered after the event dialog",
+    (doc.getElementById("main").children.length || 0) > 0,
+    `${doc.getElementById("main").children.length} child node(s)`);
 
   // --- version stamp ------------------------------------------------------
   check("api/state carries a version", typeof payload.version === "string" && payload.version.length > 0,
