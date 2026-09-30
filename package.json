@@ -4,8 +4,9 @@
   "description": "Test tooling for the wallboard UI. The app itself is Python; this manifest only exists to pin jsdom for the jsdom-based UI tests.",
   "type": "commonjs",
   "scripts": {
-    "test": "node tests/versions.test.js && node tests/ui.test.js && node tests/reload.test.js",
+    "test": "node tests/versions.test.js && node tests/tasks_api.test.js && node tests/ui.test.js && node tests/reload.test.js",
     "test:ui": "node tests/ui.test.js",
+    "test:tasks-api": "node tests/tasks_api.test.js",
     "test:reload": "node tests/reload.test.js",
     "test:live": "node tests/ui.test.js index.html https://wallboard.chicken.family/api/state && node tests/reload.test.js index.html https://wallboard.chicken.family/api/state",
     "measure": "node tests/measure.js https://wallboard.chicken.family/"

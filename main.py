@@ -30,7 +30,7 @@ INDEX_PATH = os.environ.get("INDEX_PATH", "/app/index.html")
 # Stamped into /api/state so an already-open wallboard can detect a new build
 # and reload itself. A long-running display tab otherwise keeps running the
 # JavaScript it was loaded with, and new UI features look like they're missing.
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.5.2"
 
 CALENDAR_IDS = [c.strip() for c in CALENDAR_IDS_RAW.split(",") if c.strip()]
 CALENDAR_COLORS = json.loads(CALENDAR_COLORS_RAW)
@@ -168,11 +168,12 @@ def format_attendees(item):
     return out
 
 
-def _tasks_request(method, path, body=None):
+def _tasks_request(method, path, body=None, params=None):
     """Make a raw HTTP request to the Google Tasks API.
 
     Tasks has no service-account support, so we reuse the same user OAuth
-    token that the wallboard already has for Calendar. JSON body if provided.
+    token that the wallboard already has for Calendar. Query arguments go in
+    the URL via `params`; a JSON body is only ever attached to a write method.
     Returns the parsed JSON on success; on HTTP error raises RuntimeError.
     """
     import urllib.error
@@ -181,6 +182,8 @@ def _tasks_request(method, path, body=None):
 
     creds = get_valid_credentials()
     url = f"https://tasks.googleapis.com/tasks/v1/{path.lstrip('/')}"
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
     data = None
     headers = {
         "Authorization": f"Bearer {creds.token}",
@@ -188,6 +191,11 @@ def _tasks_request(method, path, body=None):
         "Accept": "application/json",
     }
     if body is not None:
+        # The Tasks API rejects a GET that carries a body with a bare "400"
+        # and an empty message, which is miserable to debug from a wall display.
+        # Fail loudly here instead, naming the real mistake.
+        if method.upper() not in ("POST", "PATCH", "PUT"):
+            raise ValueError(f"{method} takes no body; pass query args as params=")
         data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
@@ -215,7 +223,7 @@ def fetch_tasks():
         )
 
     try:
-        lists_body = _tasks_request("GET", "users/@me/lists", {"maxResults": 100})
+        lists_body = _tasks_request("GET", "users/@me/lists", params={"maxResults": 100})
     except Exception as e:
         return [], "error", str(e)
 
@@ -225,7 +233,7 @@ def fetch_tasks():
         return [], "missing", f'no task list named "{TASKS_LIST_NAME}"'
 
     try:
-        body = _tasks_request("GET", f"lists/{match['id']}/tasks", {
+        body = _tasks_request("GET", f"lists/{match['id']}/tasks", params={
             "maxResults": TASKS_MAX_ITEMS,
             "showCompleted": "false",
             "showHidden": "false",
@@ -264,7 +272,7 @@ def create_task(title):
     """
     if not has_tasks_scope():
         raise RuntimeError(f"missing {TASKS_SCOPE} scope")
-    lists_body = _tasks_request("GET", "users/@me/lists", {"maxResults": 100})
+    lists_body = _tasks_request("GET", "users/@me/lists", params={"maxResults": 100})
     match = next((l for l in lists_body.get("items", [])
                   if (l.get("title") or "").strip().lower() == TASKS_LIST_NAME.strip().lower()), None)
     if not match:
@@ -295,7 +303,7 @@ def update_task_status(task_id, status):
         raise RuntimeError(f"missing {TASKS_SCOPE} scope")
     # First we need to know which list the task belongs to (for the URL).
     # Tasks don't expose their parent list directly, so we look it up.
-    lists_body = _tasks_request("GET", "users/@me/lists", {"maxResults": 100})
+    lists_body = _tasks_request("GET", "users/@me/lists", params={"maxResults": 100})
     match = next((l for l in lists_body.get("items", [])
                   if (l.get("title") or "").strip().lower() == TASKS_LIST_NAME.strip().lower()), None)
     if not match:
