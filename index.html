@@ -335,16 +335,36 @@
   .task-form-actions .task-confirm { background: var(--accent); color: #061021; border-color: var(--accent); font-weight: 600; }
   .task-form-msg { font-size: 1.9vmin; min-height: 2.2vmin; }
   .task-form-msg.err { color: #ff8b8b; }
-  /* The calendar-side Add control. One per view: the Tasks view keeps its own
-     button in the list header, so the toolbar one is hidden there rather than
-     putting two controls for the same action side by side. */
-  .add-global {
-    font: inherit; font-size: 1.9vmin; padding: 0.7vmin 1.8vmin;
-    border-radius: 0.8vmin; border: 0.15vmin solid var(--border);
-    cursor: pointer; margin-left: auto;
-    background: var(--panel); color: var(--accent); white-space: nowrap;
+  /* Floating add control, bottom right, the way a phone calendar does it. One
+     control for the whole app: the glyph is always "+", and only the caption
+     and the dialog it opens follow the view. Sized off vmin so it stays a sane
+     target on both a wall display and a phone. */
+  .fab-wrap {
+    position: fixed; right: 2.4vmin; bottom: 2.4vmin; z-index: 20;
+    display: flex; flex-direction: column; align-items: center; gap: 0.6vmin;
+    /* Keep the caption legible if it ever has to sit over content. */
+    pointer-events: none;
   }
-  .add-global:hover { background: var(--panel-2); border-color: var(--accent); }
+  .fab {
+    pointer-events: auto;
+    width: 7.6vmin; height: 7.6vmin; min-width: 52px; min-height: 52px;
+    border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent); color: #061021;
+    font-size: 4.6vmin; line-height: 1; font-weight: 400;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0.3vmin 1.2vmin rgba(0, 0, 0, 0.45);
+  }
+  .fab:hover { filter: brightness(1.1); }
+  .fab:active { transform: scale(0.94); }
+  .fab:focus-visible { outline: 0.3vmin solid var(--fg); outline-offset: 0.3vmin; }
+  .fab-cap {
+    pointer-events: none; color: var(--fg); font-size: 1.5vmin;
+    background: rgba(0, 0, 0, 0.45); padding: 0.3vmin 0.9vmin; border-radius: 999px;
+    white-space: nowrap;
+  }
+  /* main is a flex row holding a scrolling child, so bottom padding here keeps
+     the last row from parking permanently underneath the floating button. */
+  main { padding-bottom: 11vmin; }
   .task-form input[type="text"],
   .task-form input[type="date"],
   .task-form input[type="time"] {
@@ -376,24 +396,26 @@
   </header>
 
   <div class="toolbar">
-    <div class="tabs">
-      <button class="tab" data-view="agenda">Agenda</button>
-      <button class="tab" data-view="week">Week</button>
-      <button class="tab" data-view="month">Month</button>
-      <button class="tab" data-view="tasks">Tasks</button>
-    </div>
+    <div class="tabs" id="tabs"></div>
     <div class="nav">
       <button id="prev" title="Previous">&lsaquo;</button>
       <div class="range-label" id="range"></div>
       <button id="next" title="Next">&rsaquo;</button>
       <button class="today" id="today">Today</button>
     </div>
-    <button class="add-global" id="add-btn" type="button">+ Create event</button>
   </div>
 
   <div class="filters" id="filters"></div>
 
   <main id="main"></main>
+
+  <!-- Floating add control, bottom right, the way a phone calendar does it. It
+       is one control for the whole app: the glyph never changes, only the
+       caption under it and the dialog it opens, both driven by the view. -->
+  <div class="fab-wrap">
+    <button class="fab" id="add-btn" type="button" aria-label="Create an event">+</button>
+    <div class="fab-cap" id="add-cap">Create event</div>
+  </div>
 
   <div class="modal" id="modal" hidden>
     <div class="modal-backdrop" id="modal-backdrop"></div>
@@ -1119,32 +1141,100 @@ function _wireChecks() {
 /* =========================================================================
    Nav + wiring
    ========================================================================= */
+/* =========================================================================
+   View registry
+   ------------------------------------------------------------------------
+   Every tab is one entry here, and the tab strip is generated from it. Adding a
+   tab is a single object: give it a label, say which chrome it wants, say what
+   its add button does (or null for none), say how the arrows step its cursor,
+   and hand it a render function.
+
+   chrome:
+     "calendar" - shows the filter chips and the date stepper
+     "tasks"    - a list, so the filter chips and stepper are meaningless there
+     "none"     - neither, for a view with no calendar range at all (home
+                  control is the intended first one of these)
+
+   A Home tab is meant to land here later, for example:
+     home: { label: "Home", chrome: "none", add: null,
+             step: () => {}, render: renderHome }
+   It would want its own state and its own poll interval rather than reading
+   off state.data, so the shape deliberately does not assume a calendar.
+   ========================================================================= */
+const VIEWS = {
+  agenda: {
+    label: "Agenda", chrome: "calendar",
+    add: { label: "Create event", run: openEventCreate },
+    step: (dir) => { state.cursor = addDaysKey(state.cursor, dir); },
+    render: renderAgenda,
+  },
+  week: {
+    label: "Week", chrome: "calendar",
+    add: { label: "Create event", run: openEventCreate },
+    step: (dir) => { state.cursor = addDaysKey(state.cursor, dir * 7); },
+    render: renderWeek,
+  },
+  month: {
+    label: "Month", chrome: "calendar",
+    add: { label: "Create event", run: openEventCreate },
+    step: (dir) => { state.cursor = addMonthsKey(state.cursor, dir); },
+    render: renderMonth,
+  },
+  tasks: {
+    label: "Tasks", chrome: "tasks",
+    add: { label: "Create task", run: openTaskCreate },
+    step: () => {},
+    render: renderTasks,
+  },
+};
+
+function buildTabs() {
+  const el = document.getElementById("tabs");
+  el.innerHTML = Object.entries(VIEWS).map(([id, v]) =>
+    `<button class="tab" data-view="${esc(id)}">${esc(v.label)}</button>`).join("");
+  el.querySelectorAll(".tab").forEach((t) => {
+    t.onclick = () => { state.view = t.dataset.view; render(); };
+  });
+}
+
+function currentView() {
+  // An unknown view falls back rather than rendering nothing: a stale saved
+  // state.view must never leave the wall blank.
+  return VIEWS[state.view] || VIEWS.agenda;
+}
+
+/* The one add control. Only the caption and the dialog follow the view, so the
+   button itself never moves between tabs. */
+function syncAddButton(view) {
+  const btn = document.getElementById("add-btn");
+  const cap = document.getElementById("add-cap");
+  const wrap = document.querySelector(".fab-wrap");
+  if (!view.add) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  cap.textContent = view.add.label;
+  btn.setAttribute("aria-label", view.add.label);
+  btn.title = view.add.label;
+}
+
 function step(dir) {
-  if (state.view === "agenda") state.cursor = addDaysKey(state.cursor, dir);
-  else if (state.view === "week") state.cursor = addDaysKey(state.cursor, dir * 7);
-  else if (state.view !== "tasks") state.cursor = addMonthsKey(state.cursor, dir);
+  currentView().step(dir);
 }
 
 function render() {
   if (!state.data) return;
+  const view = currentView();
   for (const t of document.querySelectorAll(".tab"))
     t.classList.toggle("active", t.dataset.view === state.view);
-  // The Tasks view has no calendar range, so the calendar filter chips and the
-  // date stepper would both be meaningless noise on it.
-  const isTasks = state.view === "tasks";
-  document.getElementById("filters").hidden = isTasks;
-  document.querySelector(".nav").hidden = isTasks;
-  // One add control for the whole app, in one place, on every view. Only the
-  // label and the dialog it opens follow the view, so the control never moves.
-  const addBtn = document.getElementById("add-btn");
-  addBtn.textContent = isTasks ? "+ Create task" : "+ Create event";
-  addBtn.setAttribute("aria-label",
-    isTasks ? "Create a task" : "Create an event");
-  if (!isTasks) renderFilters();
-  if (state.view === "agenda") renderAgenda();
-  else if (state.view === "week") renderWeek();
-  else if (state.view === "tasks") renderTasks();
-  else renderMonth();
+  // Only a calendar view has a range to step and calendars to filter.
+  const isCalendar = view.chrome === "calendar";
+  document.getElementById("filters").hidden = !isCalendar;
+  document.querySelector(".nav").hidden = !isCalendar;
+  syncAddButton(view);
+  if (isCalendar) renderFilters();
+  view.render();
 }
 
 function renderFilters() {
@@ -1219,7 +1309,7 @@ async function poll() {
   }
 }
 
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => { state.view = t.dataset.view; render(); });
+buildTabs();
 document.getElementById("filters").addEventListener("click", e => {
   const b = e.target.closest("[data-cal]");
   if (!b) return;
@@ -1230,8 +1320,12 @@ document.getElementById("filters").addEventListener("click", e => {
 document.getElementById("prev").onclick = () => { step(-1); render(); };
 document.getElementById("next").onclick = () => { step(1); render(); };
 document.getElementById("today").onclick = () => { state.cursor = todayKey(); render(); };
-document.getElementById("add-btn").onclick = () =>
-  state.view === "tasks" ? openTaskCreate() : openEventCreate();
+// Ask the registry what the current view wants the add button to do, rather
+// than testing state.view here, so a new tab cannot be forgotten.
+document.getElementById("add-btn").onclick = () => {
+  const add = currentView().add;
+  if (add) add.run();
+};
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") closeModal();
   else if (e.key === "ArrowLeft") { step(-1); render(); }

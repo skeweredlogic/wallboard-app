@@ -187,6 +187,33 @@ const page = (expr) => window.eval(expr);
   check("small-screen rules restyle event titles", /\.event \.title\s*\{[^}]*font-size:\s*1\.\d+rem/.test(block));
   check("week view scrolls sideways on small screens", /\.wk-head, \.wk-allday, \.wk-body\s*\{[^}]*min-width/.test(block));
 
+  // --- view registry -------------------------------------------------------
+  // Home control is meant to become a tab later, and the whole point of the
+  // registry is that a tab is one entry. Assert the contract every entry has to
+  // satisfy so a half-wired tab fails here rather than on the wall.
+  const views = page("Object.keys(VIEWS)");
+  check("every view in the registry has a tab",
+    views.every((v) => !!tab(v)), views.join(", "));
+  const bad = views.filter((v) => {
+    const d = page(`(() => { const x = VIEWS[${JSON.stringify(v)}];
+      return {label: typeof x.label === "string" && x.label.length > 0,
+              chrome: ["calendar", "tasks", "none"].includes(x.chrome),
+              step: typeof x.step === "function",
+              render: typeof x.render === "function",
+              add: x.add === null || (x.add && typeof x.add.run === "function"
+                                      && typeof x.add.label === "string")}; })()`);
+    return !(d.label && d.chrome && d.step && d.render && d.add);
+  });
+  check("every view entry is fully wired", bad.length === 0,
+    bad.length ? `incomplete: ${bad.join(", ")}` : `${views.length} views: ${views.join(", ")}`);
+
+  // An unknown view must fall back rather than leaving the wall blank.
+  page("state.view = 'nope'; render()");
+  check("an unknown view falls back instead of blanking the wall",
+    (doc.getElementById("main").children.length || 0) > 0,
+    `${doc.getElementById("main").children.length} child node(s)`);
+  page("state.view = 'agenda'; render()");
+
   // --- Tasks panel --------------------------------------------------------
   // A dedicated tab must render, label and colour-code tasks independently of
   // the calendar views, and must not let the date stepper walk it off a date.
@@ -257,16 +284,29 @@ const page = (expr) => window.eval(expr);
     doc.querySelector(".tasks-count")?.textContent || "(missing)");
 
   // --- one add control, every view -----------------------------------------
-  // The add button lives in the toolbar and never moves. Only its label and the
-  // dialog it opens follow the view, so these checks are really about the label
-  // tracking state.view rather than about two separate controls.
+  // A floating + in the bottom right, for the whole app. The glyph never
+  // changes; only the caption under it and the dialog it opens follow the view.
   const addBtn = doc.getElementById("add-btn");
+  const addCap = doc.getElementById("add-cap");
   check("add button present", !!addBtn, addBtn?.textContent || "(missing)");
-  check("add button is on the tasks view", /\+\s*create task/i.test(addBtn?.textContent || ""),
-    addBtn?.textContent || "(missing)");
+  check("add button is a plain plus glyph", (addBtn?.textContent || "").trim() === "+",
+    JSON.stringify(addBtn?.textContent || "(missing)"));
+  check("add button is a floating control, not in the toolbar",
+    !!doc.querySelector(".fab-wrap") && !doc.querySelector(".toolbar #add-btn"),
+    ".fab-wrap sits outside .toolbar");
+  check("fab is anchored bottom right",
+    /\.fab-wrap\s*\{[^}]*position:\s*fixed/.test(html) && /\.fab-wrap\s*\{[^}]*right:/.test(html)
+      && /\.fab-wrap\s*\{[^}]*bottom:/.test(html),
+    (html.match(/\.fab-wrap\s*\{[^}]*\}/) || ["(not found)"])[0].replace(/\s+/g, " "));
+  check("fab is round", /\.fab\s*\{[^}]*border-radius:\s*50%/.test(html));
+  check("fab is large enough to hit on a wall display",
+    /\.fab\s*\{[^}]*min-width:\s*\d{2,}px/.test(html) && /\.fab\s*\{[^}]*min-height:\s*\d{2,}px/.test(html),
+    (html.match(/\.fab\s*\{[^}]*\}/) || ["(not found)"])[0].replace(/\s+/g, " "));
+  check("add button is on the tasks view", /^create task$/i.test(addCap?.textContent || ""),
+    addCap?.textContent || "(missing)");
   check("add button is on every view, not per-view",
     !doc.getElementById("task-create-btn") && !doc.getElementById("add-event-btn"),
-    "single #add-btn in the toolbar");
+    "single #add-btn");
   check("no inline task input on the list",
     !doc.getElementById("task-add-input"), "field moved into the dialog");
 
@@ -309,12 +349,16 @@ const page = (expr) => window.eval(expr);
     doc.getElementById("add-btn") === addBtn, "same element across views");
 
   click(tab("agenda"));
-  check("add button relabels on a calendar view", /\+\s*create event/i.test(addBtn?.textContent || ""),
-    addBtn?.textContent || "(missing)");
-  check("add button stays visible on a calendar view", addBtn?.hidden === false,
-    `hidden=${addBtn?.hidden}`);
-  check("labels are parallel across views",
-    /^\+\s*create \w+$/i.test(addBtn?.textContent || ""), addBtn?.textContent || "(missing)");
+  check("add caption relabels on a calendar view", /^create event$/i.test(addCap?.textContent || ""),
+    addCap?.textContent || "(missing)");
+  check("fab glyph never changes", (addBtn?.textContent || "").trim() === "+",
+    JSON.stringify(addBtn?.textContent || "(missing)"));
+  check("fab stays visible on a calendar view",
+    doc.querySelector(".fab-wrap")?.hidden === false, `hidden=${doc.querySelector(".fab-wrap")?.hidden}`);
+  check("captions are parallel across views",
+    /^create (event|task)$/i.test(addCap?.textContent || ""), addCap?.textContent || "(missing)");
+  check("add button is the same element on every view", doc.getElementById("add-btn") === addBtn,
+    "single #add-btn");
 
   click(addBtn);
   check("add button opens the event dialog", doc.getElementById("modal").hidden === false);

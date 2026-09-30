@@ -30,7 +30,7 @@ INDEX_PATH = os.environ.get("INDEX_PATH", "/app/index.html")
 # Stamped into /api/state so an already-open wallboard can detect a new build
 # and reload itself. A long-running display tab otherwise keeps running the
 # JavaScript it was loaded with, and new UI features look like they're missing.
-APP_VERSION = "0.5.5"
+APP_VERSION = "0.5.6"
 
 CALENDAR_IDS = [c.strip() for c in CALENDAR_IDS_RAW.split(",") if c.strip()]
 CALENDAR_COLORS = json.loads(CALENDAR_COLORS_RAW)
